@@ -1,4 +1,6 @@
+import os, sys
 import tkinter as tk
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageTk
 
 W, H = 260, 270
@@ -14,7 +16,7 @@ def _font(size, bold=False):
             continue
     return ImageFont.load_default()
 
-def render(percent, picture=None):
+def render_fallback(percent, picture=None):
     img = Image.new("RGB", (W, H), (38, 52, 44))
     d = ImageDraw.Draw(img)
     for x in range(0, W, 26):
@@ -87,3 +89,63 @@ class SizePreview(tk.Toplevel):
 
     def hide(self):
         self.withdraw()
+
+PAD = 110
+BAR_CENTER_X = 270
+BAR_TOP_Y = 163
+POPUP_UP = 112
+POPUP_REAL = 140
+SHOW_SCALE = 0.66
+_scene_cache = []
+
+def _scene():
+    if _scene_cache:
+        return _scene_cache[0]
+    here = os.path.dirname(os.path.abspath(__file__))
+    for path in (os.path.join(getattr(sys, "_MEIPASS", here), "scene.png"), os.path.join(here, "..", "assets", "scene.png"), os.path.join(here, "scene.png")):
+        if os.path.exists(path):
+            arr = np.asarray(Image.open(path).convert("RGB"))
+            arr = np.pad(arr, ((PAD, 0), (0, 0), (0, 0)), mode="reflect")
+            _scene_cache.append(Image.fromarray(arr))
+            return _scene_cache[0]
+    _scene_cache.append(None)
+    return None
+
+def render(percent, picture=None):
+    base = _scene()
+    if base is None:
+        return render_fallback(percent, picture)
+    img = base.copy()
+    d = ImageDraw.Draw(img)
+    cx, cy = BAR_CENTER_X + 3, BAR_TOP_Y - POPUP_UP + PAD
+    half0 = POPUP_REAL // 2
+    size = max(8, int(round(POPUP_REAL * percent / 100.0)))
+    half = size // 2
+    box = (cx - half, cy - half, cx + half, cy + half)
+    if picture is not None:
+        pic = picture.convert("RGBA")
+        pic.thumbnail((size, size), Image.LANCZOS)
+        bg = Image.new("RGBA", (size, size), (70, 70, 70, 255))
+        bg.alpha_composite(pic, ((size - pic.width) // 2, (size - pic.height) // 2))
+        img.paste(bg.convert("RGB"), (box[0], box[1]))
+    else:
+        d.rectangle(box, fill=(255, 203, 71))
+        r = max(3, size // 14)
+        ex, ey = size // 5, size // 8
+        d.ellipse((cx - ex - r, cy - ey - r, cx - ex + r, cy - ey + r), fill=(60, 40, 10))
+        d.ellipse((cx + ex - r, cy - ey - r, cx + ex + r, cy - ey + r), fill=(60, 40, 10))
+        d.arc((cx - size // 4, cy - size // 6, cx + size // 4, cy + size // 4), 20, 160, fill=(60, 40, 10), width=max(3, size // 20))
+    d.rectangle(box, outline=(255, 255, 255), width=3)
+    dash = (120, 220, 255)
+    nx0, ny0, nx1, ny1 = cx - half0, cy - half0, cx + half0, cy + half0
+    for a, b, c, e in ((nx0, ny0, nx1, ny0), (nx0, ny1, nx1, ny1), (nx0, ny0, nx0, ny1), (nx1, ny0, nx1, ny1)):
+        steps = max(abs(c - a), abs(e - b))
+        for t in range(0, steps, 14):
+            t2 = min(t + 7, steps)
+            d.line((a + (c - a) * t / steps, b + (e - b) * t / steps, a + (c - a) * t2 / steps, b + (e - b) * t2 / steps), fill=dash, width=2)
+    out = img.resize((int(img.width * SHOW_SCALE), int(img.height * SHOW_SCALE)), Image.LANCZOS)
+    o = ImageDraw.Draw(out, "RGBA")
+    o.rectangle((0, 0, out.width, 50), fill=(0, 0, 0, 150))
+    o.text((10, 6), "In-game size: %d%%" % percent, font=_font(15, True), fill=(255, 255, 255))
+    o.text((10, 29), "dashed box = normal size", font=_font(11), fill=dash)
+    return out
