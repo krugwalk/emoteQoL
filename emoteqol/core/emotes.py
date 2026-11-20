@@ -262,7 +262,7 @@ def popup_settings(game, em, files, other):
     size = 100
     for m in mine:
         o = next((x for x in orig if x["name"] == m["name"] and x["scale"] and x["scale"][0] > 0), None)
-        if m["scale"] and o:
+        if m["scale"] and m["scale"][0] > 0.01 and o:
             size = int(round(m["scale"][0] / o["scale"][0] * 100 / 5.0) * 5); break
     normal = lambda L: sum(1 for x in L if x["blend"] == 1)
     layers = max(1, int(round(normal(mine) / max(1, normal(orig)))))
