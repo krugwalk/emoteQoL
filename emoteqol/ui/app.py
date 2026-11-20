@@ -395,7 +395,7 @@ class App(tk.Tk):
         def done(r, err):
             self.busy("")
             if err or not r or not r[0]: return messagebox.showinfo("Cannot preview", "The preview needs LtMAO's decoder to read game sounds, and a readable sound file." if not err else err[-300:])
-            import winsound; winsound.PlaySound(r[0], winsound.SND_FILENAME | winsound.SND_ASYNC); self.busy("Playing. Scaled up 30 dB so it is audible on speakers; its loudness compared with other game sounds is exact.")
+            import winsound; winsound.PlaySound(r[0], winsound.SND_FILENAME | winsound.SND_ASYNC); self.busy("Playing at the level League plays it for your volume settings. Turn your PC volume up to hear quiet sounds, the same as in the game.")
         self.run_bg(work, done)
     def clear_sound(self):
         self.sound_path = None; self.sound_game = None; self.sound_keep = None; self.vid_sound_v.set(False); self.sound_lbl.configure(text="none - the emote keeps its normal sound"); self.snd_len.state(["disabled"]); self.snd_len_lbl.configure(text="(pick a sound first)"); self.update_add()

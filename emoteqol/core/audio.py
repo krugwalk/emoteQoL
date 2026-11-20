@@ -92,7 +92,6 @@ def detect_pack_sound(game, em, files, other):
                 oo = _volume_prop(ob, oobjs, sid); out["orig_level"] = struct.unpack_from("<f", ob, oo)[0] if oo else 0.0
     return out
 
-PREVIEW_LISTENING_DB = 30.0
 LPF_MAX_HZ = 20000.0
 LPF_MIN_HZ = 100.0
 HPF_MIN_HZ = 20.0
@@ -187,8 +186,8 @@ def preview_wav(path, max_seconds, profile, wem=None):
         pcm = load_pcm(path)[:int(max_seconds * RATE)]; tmp = tempfile.mktemp(suffix=".wav"); _write_wav(tmp, pcm, -4.0, DYN_RATIOS["Evened out"])
         w = wave.open(tmp); x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float64) / 32768.0; w.close(); os.remove(tmp)
     x = apply_game_filters(x, profile["lpf"], profile["hpf"])
-    y = np.clip(x * 10 ** ((profile["total_db"] + PREVIEW_LISTENING_DB) / 20.0), -1.0, 1.0)
-    w = wave.open(out_path, "wb"); w.setnchannels(1); w.setsampwidth(2); w.setframerate(RATE); w.writeframes((y * 32000).astype(np.int16).tobytes()); w.close()
+    y = np.clip(x * 10 ** (profile["total_db"] / 20.0), -1.0, 1.0)
+    w = wave.open(out_path, "wb"); w.setnchannels(1); w.setsampwidth(4); w.setframerate(RATE); w.writeframes((y * 2147483000.0).astype(np.int32).tobytes()); w.close()
     return out_path
 
 def first_audible_wem(game, event_name):
