@@ -10,7 +10,7 @@ if os.path.isdir(_OLD) and not os.path.exists(APPDATA):
     except Exception: pass
 os.makedirs(APPDATA, exist_ok=True)
 EMOTE_BIN = 0xf8ed8b424917d8f6
-FLAGS = dict(birthscale=0xf0eb7084, startframe=0x76f8ad24, delay=0x22e763bc, blend=0xfa784eab, texdiv=0x86a84509, count=0x1e67b0f1, rate=0x9b111ae4, tex=0x3c6468f4, life=0x2a552694, emlist=0x868eb76a, name=0x3d25b8ce)
+FLAGS = dict(emitrate=0xae839c67, birthscale=0xf0eb7084, startframe=0x76f8ad24, delay=0x22e763bc, blend=0xfa784eab, texdiv=0x86a84509, count=0x1e67b0f1, rate=0x9b111ae4, tex=0x3c6468f4, life=0x2a552694, emlist=0x868eb76a, name=0x3d25b8ce)
 
 def decode_tex(d):
     assert d[:4] == b"TEX\0", "not a TEX file"
@@ -306,12 +306,20 @@ def flatten_popup(binbytes, vfx_path):
         if not any(t == target for F, t, b in infos): continue
         for F, tex, blend in infos:
             if tex == target and blend != 4: continue
-            if FLAGS["birthscale"] not in F: continue
-            try: ft, vs = _fields(d, F[FLAGS["birthscale"]][1])[0xb4b427aa]
-            except KeyError: continue
-            if ft != 12: continue
-            x, y, z = struct.unpack_from("<3f", d, vs)
-            if x or y or z: struct.pack_into("<3f", d, vs, 0.0, 0.0, 0.0); removed += 1
+            gone = False
+            if FLAGS["emitrate"] in F:
+                try:
+                    ft, vs = _fields(d, F[FLAGS["emitrate"]][1])[0xb4b427aa]
+                    if ft == 10 and struct.unpack_from("<f", d, vs)[0] != 0.0: struct.pack_into("<f", d, vs, 0.0); gone = True
+                except KeyError: pass
+            if FLAGS["birthscale"] in F:
+                try:
+                    ft, vs = _fields(d, F[FLAGS["birthscale"]][1])[0xb4b427aa]
+                    if ft == 12:
+                        x, y, z = struct.unpack_from("<3f", d, vs)
+                        if x or y or z: struct.pack_into("<3f", d, vs, 0.0, 0.0, 0.0); gone = True
+                except KeyError: pass
+            if gone: removed += 1
     BP.RANGES.clear(); BP.parse(bytes(d))
     return bytes(d), removed
 

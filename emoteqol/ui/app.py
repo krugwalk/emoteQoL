@@ -300,7 +300,7 @@ class App(tk.Tk):
 
     def add_to_pack(self):
         e = self.cur; path = self.repl_path; animated = self.anim_v.get(); fit = self.fit_v.get(); loops = float(self.loops_v.get()); adj = self.adj()
-        size = int(round(self.size_v.get())); flat = True; opa = 2; qual = "compact"
+        size = int(round(self.size_v.get())); flat = True; opa = 0; qual = "compact"
         self.busy("Building the replacement for '%s'..." % e["name"]); self.add_btn.configure(state="disabled")
         spath = self.sound_path; sgame = self.sound_game; keep = self.sound_keep if not (self.sound_path or self.sound_game) else None; mem = self.mem_frames if (self.mem_frames and path == self.repl_path) else None
         try: smax = max(0.3, float(self.snd_max_v.get()))
