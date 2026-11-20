@@ -149,3 +149,44 @@ def render(percent, picture=None):
     o.text((10, 6), "In-game size: %d%%" % percent, font=_font(15, True), fill=(255, 255, 255))
     o.text((10, 29), "dashed box = normal size", font=_font(11), fill=dash)
     return out
+
+_small_cache = {}
+
+def render_small(percent, picture=None, scale=0.42):
+    base = _scene()
+    if base is None:
+        return render_fallback(percent, picture)
+    key = round(scale, 3)
+    if key not in _small_cache:
+        _small_cache[key] = base.resize((int(base.width * scale), int(base.height * scale)), Image.LANCZOS)
+    img = _small_cache[key].copy()
+    d = ImageDraw.Draw(img)
+    cx, cy = int((BAR_CENTER_X + 3) * scale), int((BAR_TOP_Y - POPUP_UP + PAD) * scale)
+    half0 = int(POPUP_REAL * scale / 2)
+    size = max(6, int(round(POPUP_REAL * scale * percent / 100.0)))
+    half = size // 2
+    box = (cx - half, cy - half, cx + half, cy + half)
+    if picture is not None:
+        pic = picture.convert("RGBA").resize((size, size), Image.BILINEAR)
+        bg = Image.new("RGBA", (size, size), (70, 70, 70, 255))
+        bg.alpha_composite(pic)
+        img.paste(bg.convert("RGB"), (box[0], box[1]))
+    else:
+        d.rectangle(box, fill=(255, 203, 71))
+        r = max(2, size // 14)
+        ex, ey = size // 5, size // 8
+        d.ellipse((cx - ex - r, cy - ey - r, cx - ex + r, cy - ey + r), fill=(60, 40, 10))
+        d.ellipse((cx + ex - r, cy - ey - r, cx + ex + r, cy - ey + r), fill=(60, 40, 10))
+        d.arc((cx - size // 4, cy - size // 6, cx + size // 4, cy + size // 4), 20, 160, fill=(60, 40, 10), width=max(2, size // 20))
+    d.rectangle(box, outline=(255, 255, 255), width=1)
+    dash = (120, 220, 255)
+    nx0, ny0, nx1, ny1 = cx - half0, cy - half0, cx + half0, cy + half0
+    for a, b, c, e in ((nx0, ny0, nx1, ny0), (nx0, ny1, nx1, ny1), (nx0, ny0, nx0, ny1), (nx1, ny0, nx1, ny1)):
+        steps = max(abs(c - a), abs(e - b), 1)
+        for t in range(0, steps, 6):
+            t2 = min(t + 3, steps)
+            d.line((a + (c - a) * t / steps, b + (e - b) * t / steps, a + (c - a) * t2 / steps, b + (e - b) * t2 / steps), fill=dash, width=1)
+    o = ImageDraw.Draw(img, "RGBA")
+    o.rectangle((0, 0, img.width, 18), fill=(0, 0, 0, 150))
+    o.text((5, 3), "Size %d%%  (dashed = normal)" % percent, font=_font(10), fill=(255, 255, 255))
+    return img

@@ -13,7 +13,7 @@ Windows might warn about an unknown app because the exe isn't signed. Click "Mor
 ## What it does
 
 - Swap any emote for a picture, a GIF or a video
-- Make an emote bigger or smaller in game with the size slider
+- Make an emote bigger or smaller in game with the size slider. A live preview shows your picture, cropping, size and GIF speed above a champion as it will look in game
 - Change just the sound of an emote, and hear a preview of how it will sound in League before saving. The preview uses the game's own mixer settings and your League volume settings
 - Change the loading screen and HUD portrait of any champion and skin
 - Open a `.fantome` you already have, look at the pictures, GIFs and sounds inside it, edit them and save, the rest of the file stays as it is
