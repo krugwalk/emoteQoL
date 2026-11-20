@@ -5,6 +5,8 @@ from PIL import Image, ImageTk
 from emoteqol.core import emotes as C
 from emoteqol.ui import skin_tab
 from emoteqol.ui import size_preview
+from emoteqol.core import styles as PS
+import time
 from emoteqol.ui import trimbar
 import bisect
 from emoteqol import updater
@@ -20,7 +22,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__(); self.title("EmoteQoL v%s - emotes, loading screens and HUD portraits with your own pictures" % updater.VERSION); self.geometry("1180x1050"); self.minsize(1000, 800)
         self.set = load_settings(); self.game = None; self.cat = []; self.cur = None; self.pack = C.Pack(); self.icons = {}; self.photo_refs = {}; self.q = queue.Queue()
-        self.cur_i = 0; self.times = []; self.clip_total = 0.0; self.trim_t = (0.0, 0.0); self.trim_idx = (0, 0); self.popup_T = 2.3; self.sound_keep = None; self.repl_path = None; self.mem_frames = None; self.repl_frames = []; self.repl_durs = []; self.anim_job = None; self.matches = []
+        self.cur_i = 0; self.times = []; self.clip_total = 0.0; self.trim_t = (0.0, 0.0); self.trim_idx = (0, 0); self.popup_T = 2.3; self.style_src = None; self.style_templates = []; self.popup_job = None; self.popup_playing = False; self.sound_keep = None; self.repl_path = None; self.mem_frames = None; self.repl_frames = []; self.repl_durs = []; self.anim_job = None; self.matches = []
         self._ui(); self.after(100, self._poll); self.after(200, self.open_game); self.after(2500, lambda: updater.check_async(lambda r: self.q.put(lambda: self.show_update(r))))
 
     def _ui(self):
@@ -42,7 +44,8 @@ class App(tk.Tk):
         right = ttk.Frame(main); main.add(right, weight=1)
         self.cur_name = ttk.Label(right, text="Pick an emote on the left", font=("Segoe UI", 13, "bold")); self.cur_name.pack(anchor="w")
         row = ttk.Frame(right); row.pack(fill="x", pady=6)
-        box1 = ttk.LabelFrame(row, text="In game, above your champion"); box1.pack(side="left", padx=4); self.scene_lbl = ttk.Label(box1); self.scene_lbl.pack(padx=6, pady=6); self.scene_photo = None
+        box1 = ttk.LabelFrame(row, text="In game, above your champion"); box1.pack(side="left", padx=4); self.scene_lbl = ttk.Label(box1); self.scene_lbl.pack(padx=6, pady=(6, 2)); self.scene_photo = None
+        self.pop_btn = ttk.Button(box1, text="Pop up", command=self.play_popup, state="disabled"); self.pop_btn.pack(pady=(0, 6))
         box2 = ttk.LabelFrame(row, text="Your replacement - drag to move, drag the edges / corners to stretch"); box2.pack(side="left", padx=4)
         self.cv = tk.Canvas(box2, width=self.CS, height=self.CS, bg="#262626", highlightthickness=0); self.cv.pack(padx=6, pady=6)
         self.rect = (0.0, 0.0, 1.0, 1.0); self.drag = None; self.cv_photo = None; self.edit_src = []; self.checker = self._make_checker()
@@ -51,7 +54,8 @@ class App(tk.Tk):
         self.draw_editor()
         self.src_lbl = ttk.Label(right, text="No image chosen"); self.src_lbl.pack(anchor="w")
         pr = ttk.Frame(right); pr.pack(fill="x", pady=4); ttk.Button(pr, text="Choose GIF / image / video...", command=self.pick_image).pack(side="left")
-        self.vid_sound_v = tk.BooleanVar(value=False); self.vid_sound_cb = ttk.Checkbutton(pr, text="Use this video's sound", variable=self.vid_sound_v, command=self.toggle_video_sound, state="disabled"); self.vid_sound_cb.pack(side="left", padx=12); ttk.Button(pr, text="Reset position / size", command=self.reset_adj).pack(side="left", padx=6)
+        self.vid_sound_v = tk.BooleanVar(value=False); self.vid_sound_cb = ttk.Checkbutton(pr, text="Use this video's sound", variable=self.vid_sound_v, command=self.toggle_video_sound, state="disabled"); self.vid_sound_cb.pack(side="left", padx=12); ttk.Button(pr, text="Reset position / size", command=self.reset_adj).pack(side="left", padx=6); ttk.Label(pr, text="Popup animation:").pack(side="left", padx=(14, 4)); self.style_v = tk.StringVar(value=self.STYLE_OWN)
+        self.style_cb = ttk.Combobox(pr, textvariable=self.style_v, values=[self.STYLE_OWN], width=27, state="disabled"); self.style_cb.pack(side="left"); self.style_cb.bind("<<ComboboxSelected>>", self.on_style_choice)
         opt = ttk.LabelFrame(right, text="Options"); opt.pack(fill="x", pady=4)
         self.anim_v = tk.BooleanVar(value=True); ttk.Checkbutton(opt, text="Animate in game (GIF -> flipbook)", variable=self.anim_v).grid(row=0, column=0, columnspan=2, sticky="w", padx=6)
         self.size_v = tk.DoubleVar(value=100.0); self.size_lbl = ttk.Label(opt, text="In-game size: 100%", width=18); self.size_lbl.grid(row=0, column=2, sticky="e", padx=(14, 4))
@@ -160,7 +164,7 @@ class App(tk.Tk):
         def job(): g = C.Game(path); return g, C.build_catalogue(g)
         def done(r, err):
             if err: self.busy("Could not read the game files."); return messagebox.showerror("Error", err)
-            self.game, self.cat = r; self.busy("%d emotes found. Pick one, choose your image, add it to the pack." % len(self.cat)); self.refilter(); self.skin_tab.start()
+            self.game, self.cat = r; self.busy("%d emotes found. Pick one, choose your image, add it to the pack." % len(self.cat)); self.refilter(); self.skin_tab.start(); self.run_bg(lambda: PS.harvest(self.game), lambda r, e: self.styles_loaded())
         self.run_bg(job, done)
     def refilter(self):
         q = self.sv.get().strip().lower(); words = q.split()
@@ -208,7 +212,7 @@ class App(tk.Tk):
         if not getattr(self, "loading_pack", False): self.reset_for_emote(self.cur)
         self.refresh_profile()
     def reset_for_emote(self, em):
-        self.clear_sound(); self.snd_boost_v.set(0.0); self.size_v.set(100); self._size_changed(); self.anim_v.set(True); self.loops_v.set(100.0)
+        self.stop_popup(); self.clear_sound(); self.snd_boost_v.set(0.0); self.size_v.set(100); self._size_changed(); self.anim_v.set(True); self.loops_v.set(100.0); self.set_style(None, play=False)
         if self.mem_frames is not None:
             if self.anim_job: self.after_cancel(self.anim_job); self.anim_job = None
             self.repl_path = None; self.repl_frames = []; self.repl_durs = []; self.edit_src = []; self.mem_frames = None
@@ -220,7 +224,7 @@ class App(tk.Tk):
         if res: self.edit_from_pack(em, res[0], res[1])
         else:
             st = entry.get("settings") or {}
-            self.restore_sound_and_size(em); self.update_add()
+            self.restore_sound_and_size(em); self.restore_style(em); self.update_add()
     def big_icon(self, e):
         k = (e["key"], 160)
         if k not in self.photo_refs:
@@ -364,7 +368,7 @@ class App(tk.Tk):
     def _size_changed(self, v=None):
         r = int(round(float(self.size_v.get()) / 5.0) * 5); self.size_v.set(r); self.size_lbl.configure(text="In-game size: %d%%" % r); self.update_add()
         self.update_scene()
-    def update_add(self): self.add_btn.configure(state="normal" if (self.cur and self.game and (self.repl_path or self.sound_path or self.sound_game or int(round(self.size_v.get())) != 100)) else "disabled")
+    def update_add(self): self.add_btn.configure(state="normal" if (self.cur and self.game and (self.repl_path or self.sound_path or self.sound_game or self.style_src or int(round(self.size_v.get())) != 100)) else "disabled")
     def _len_label(self):
         v = self.snd_max_v.get(); self.snd_len_lbl.configure(text="%.1f s of %.1f s%s" % (v, self.snd_total, "   (long sound effects get cut by the game)" if v > 8 else ""))
     def set_sound_file(self, path):
@@ -385,7 +389,7 @@ class App(tk.Tk):
         self.busy("Building the replacement for '%s'..." % e["name"]); self.add_btn.configure(state="disabled")
         t0, t1 = self.trim_t; popup_T = self.popup_T; lo, hi = self.trim_idx; cut = bool(path and len(self.repl_frames) > 1 and (hi - lo + 1) < len(self.repl_frames)); piece = (self.repl_frames[lo:hi + 1], self.repl_durs[lo:hi + 1]) if cut else None
         vstart = t0 if (self.sound_path and self.sound_path == path and C.is_video(path)) else 0.0
-        spath = self.sound_path; sgame = self.sound_game; keep = self.sound_keep if not (self.sound_path or self.sound_game) else None; mem = (piece or (self.repl_frames, self.repl_durs)) if (path and not os.path.exists(path) and self.repl_frames) else None
+        sty = self.style_src; spath = self.sound_path; sgame = self.sound_game; keep = self.sound_keep if not (self.sound_path or self.sound_game) else None; mem = (piece or (self.repl_frames, self.repl_durs)) if (path and not os.path.exists(path) and self.repl_frames) else None
         try: smax = max(0.3, float(self.snd_max_v.get()))
         except Exception: smax = 6.0
         try: sboost = min(30.0, max(-30.0, float(self.snd_boost_v.get())))
@@ -393,7 +397,11 @@ class App(tk.Tk):
         def job():
             import tempfile; from emoteqol.core import audio as A
             pre = mem or (C.load_video_range(path, t0, min(t1, t0 + max(4.0, popup_T * loops / 100.0 + 1.0))) if (path and C.is_video(path)) else piece)
-            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, pre, flat) if path else (C.build_size_only(self.game, e, size, flat) if size != 100 else ({}, [])); snd = None
+            style = None
+            if sty:
+                src = PS.source_for(self.game, sty["vfx"])
+                if src: style = (src[0], src[1], sty["label"])
+            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, pre, flat, style) if path else (C.build_size_only(self.game, e, size, flat, style) if (size != 100 or style) else ({}, [])); snd = None
             if spath or sgame:
                 from emoteqol.core import audio as A
                 ev = A.event_for_emote(self.game, e, C.emote_bins(self.game))
@@ -421,7 +429,7 @@ class App(tk.Tk):
         def done(r, err):
             self.update_add()
             if err: self.busy("Failed."); self.say("ERROR: " + err); return messagebox.showerror("Error", err[-600:])
-            files, notes, snd = r; self.pack.add(e, files, os.path.basename(path) if path else ("(size only)" if not spath and not sgame else "(sound only)"), "; ".join(notes), dict(animate=bool(animated), speed=float(loops), fit=fit, size=int(size)))
+            files, notes, snd = r; self.pack.add(e, files, os.path.basename(path) if path else ("(size only)" if not spath and not sgame else "(sound only)"), "; ".join(notes), dict(animate=bool(animated), speed=float(loops), fit=fit, size=int(size), style=(dict(label=sty["label"], vfx=sty["vfx"], name=sty.get("name")) if sty else None)))
             if snd: self.pack.sounds[e["key"]] = snd
             else: self.pack.sounds.pop(e["key"], None)
             lost = [n for n in notes if n.startswith("sound:") and "unchanged" in n]
@@ -499,6 +507,81 @@ class App(tk.Tk):
             if err or not r: info.configure(text="Could not load the sound list."); return
             items.extend(r); fill()
         self.run_bg(lambda: A.sound_catalogue(self.game, self.cat, C.emote_bins(self.game), cache), done)
+    STYLE_OWN = "Normal (the emote's own)"
+    STYLE_PICK = "Another emote's animation..."
+    def styles_loaded(self):
+        try: self.style_templates = PS.templates(self.game)
+        except Exception: self.style_templates = []
+        self.style_cb.configure(values=[self.STYLE_OWN] + [self.style_text(dict(label=t["label"])) for t in self.style_templates] + [self.STYLE_PICK], state="readonly"); self.pop_btn.configure(state="normal"); self.show_style_text()
+    def style_text(self, s):
+        if not s: return self.STYLE_OWN
+        t = next((t for t in self.style_templates if t["label"] == s["label"]), None)
+        if t: return "%s - %d emotes" % (t["label"], t["count"])
+        return ("Like %s (%s)" % (s["name"], s["label"])) if s.get("name") else s["label"]
+    def show_style_text(self): self.style_v.set(self.style_text(self.style_src))
+    def on_style_choice(self, ev=None):
+        i = self.style_cb.current(); n = len(self.style_templates)
+        if i <= 0: self.set_style(None)
+        elif i > n: self.show_style_text(); self.pick_style_emote()
+        else: t = self.style_templates[i - 1]; self.set_style(dict(label=t["label"], vfx=t["vfx"]))
+    def set_style(self, s, play=True):
+        self.style_src = s; self.show_style_text(); self.update_add(); self.update_scene()
+        if play and self.cur and self.game: self.play_popup()
+    def restore_style(self, em):
+        entry = self.pack.emotes.get(em["key"]) or {}; st = (entry.get("settings") or {}).get("style")
+        try: sty = st if isinstance(st, dict) and st.get("vfx") else PS.detect(self.game, em, entry.get("files", {}), self.pack.other)
+        except Exception: sty = None
+        self.set_style(sty, play=False)
+    def pick_style_emote(self):
+        dlg = tk.Toplevel(self); dlg.title("Use the popup animation of another emote"); dlg.geometry("460x520"); dlg.transient(self)
+        sv = tk.StringVar(); ttk.Label(dlg, text="Search an emote - your emote's popup will move like its popup does:").pack(anchor="w", padx=8, pady=(8, 2)); ttk.Entry(dlg, textvariable=sv).pack(fill="x", padx=8)
+        fr = ttk.Frame(dlg); fr.pack(fill="both", expand=True, padx=8, pady=6); lb = tk.Listbox(fr, activestyle="dotbox"); sb = ttk.Scrollbar(fr, command=lb.yview); lb.configure(yscrollcommand=sb.set); lb.pack(side="left", fill="both", expand=True); sb.pack(side="left", fill="y")
+        info = ttk.Label(dlg, text="", foreground="#666"); info.pack(anchor="w", padx=8); shown = []; items = []
+        for e in self.cat:
+            lab = PS.label_of(self.game, e["vfx"])
+            if lab: items.append((e, lab))
+        def fill(*_):
+            q = sv.get().lower().strip(); lb.delete(0, "end"); shown.clear()
+            for e, lab in items:
+                if q in e["name"].lower() or q in lab.lower():
+                    shown.append((e, lab)); lb.insert("end", "%s   -  %s" % (e["name"], lab))
+                    if len(shown) >= 400: break
+            info.configure(text="%d emote%s%s" % (len(shown), "" if len(shown) == 1 else "s", " (type to narrow the list down)" if len(shown) >= 400 else ""))
+        def choose(*_):
+            if not lb.curselection(): return
+            e, lab = shown[lb.curselection()[0]]; dlg.destroy(); self.set_style(dict(label=lab, vfx=e["vfx"], name=e["name"]))
+        ttk.Button(dlg, text="Use this animation", command=choose).pack(pady=(0, 8)); lb.bind("<Double-Button-1>", choose); sv.trace_add("write", fill); fill()
+        dlg.protocol("WM_DELETE_WINDOW", lambda: (dlg.destroy(), self.show_style_text()))
+    def stop_popup(self):
+        self.popup_playing = False
+        if self.popup_job: self.after_cancel(self.popup_job); self.popup_job = None
+    def play_popup(self):
+        self.stop_popup()
+        if not self.cur or not self.game: return self.busy("Pick an emote first.")
+        try:
+            if self.style_src: src = PS.source_for(self.game, self.style_src["vfx"]); lay = PS.layers(src[0], src[1]) if src else []
+            else: lay = PS.own_layers(self.game, self.cur["vfx"])
+        except Exception: lay = []
+        vis = PS.visible_layers(lay)
+        if not vis: return self.busy("This popup has no animation that can be shown.")
+        ref = PS.reference_size(lay); T = PS.length(lay) + 0.2; label = self.style_src["label"] if self.style_src else "Normal"
+        try: sp = max(0.1, float(self.loops_v.get()) / 100.0)
+        except Exception: sp = 1.0
+        try: pct = int(round(self.size_v.get()))
+        except Exception: pct = 100
+        t0, t1 = self.trim_t; window = max(0.05, min(max(0.05, t1 - t0), self.popup_T * sp)); fit = self.fit_v.get(); adj = self.adj(); pics = {}; start = time.time(); self.popup_playing = True
+        def tick():
+            t = time.time() - start
+            if t >= T or not self.popup_playing: self.popup_job = None; self.popup_playing = False; self.update_scene(); return
+            idx = 0
+            if len(self.edit_src) > 1 and self.anim_v.get() and self.times: idx = min(len(self.edit_src) - 1, max(0, bisect.bisect_right(self.times, t0 + (t * sp) % window) - 1))
+            if idx not in pics:
+                try: pics[idx] = C.fit_frame(self.edit_src[idx], 160, fit, adj) if self.edit_src else None
+                except Exception: pics[idx] = None
+            poses = [p for p in (PS.pose(l, t) for l in vis) if p]
+            self.scene_photo = ImageTk.PhotoImage(size_preview.render_motion(pct, pics[idx], poses, ref, "%s  %.1f s" % (label, t), 0.37)); self.scene_lbl.configure(image=self.scene_photo)
+            self.popup_job = self.after(33, tick)
+        tick()
     def refresh_pack(self):
         self.ptree.delete(*self.ptree.get_children())
         for key, e in self.pack.emotes.items():
@@ -598,7 +681,7 @@ class App(tk.Tk):
         st = self.pack.emotes[em["key"]].get("settings") or {}; speed = float(st.get("speed", 100.0)) or 100.0
         self.loops_v.set(speed); self.anim_v.set(bool(st.get("animate", len(frames) > 1)))
         if speed != 100.0: self.repl_durs = [x * speed / 100.0 for x in durs]; self.mem_frames = (self.repl_frames, self.repl_durs)
-        self.setup_clip(); self.restore_sound_and_size(em)
+        self.setup_clip(); self.restore_sound_and_size(em); self.restore_style(em)
         self.src_lbl.configure(text="%s   (%d frame%s, loaded from the pack - move, stretch or change it, then press Add)" % (em["name"], len(self.repl_frames), "" if len(self.repl_frames) == 1 else "s"))
         self.reset_adj(); self.play(0); self.update_add(); self.refresh_profile(); self.busy("Loaded '%s' from the pack into the editor." % em["name"])
     def remove_selected(self):

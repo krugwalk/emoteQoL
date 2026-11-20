@@ -190,3 +190,53 @@ def render_small(percent, picture=None, scale=0.42):
     o.rectangle((0, 0, img.width, 18), fill=(0, 0, 0, 150))
     o.text((5, 3), "Size %d%%  (dashed = normal)" % percent, font=_font(10), fill=(255, 255, 255))
     return img
+
+_placeholder_cache = {}
+
+def _placeholder(size=160):
+    if size not in _placeholder_cache:
+        im = Image.new("RGBA", (size, size), (255, 203, 71, 255))
+        d = ImageDraw.Draw(im)
+        r, ex, ey = max(3, size // 14), size // 5, size // 8
+        c = size // 2
+        d.ellipse((c - ex - r, c - ey - r, c - ex + r, c - ey + r), fill=(60, 40, 10))
+        d.ellipse((c + ex - r, c - ey - r, c + ex + r, c - ey + r), fill=(60, 40, 10))
+        d.arc((c - size // 4, c - size // 6, c + size // 4, c + size // 4), 20, 160, fill=(60, 40, 10), width=max(3, size // 20))
+        _placeholder_cache[size] = im
+    return _placeholder_cache[size]
+
+def render_motion(percent, picture, poses, ref, caption="", scale=0.37):
+    base = _scene()
+    if base is None:
+        return render_fallback(percent, picture)
+    key = round(scale, 3)
+    if key not in _small_cache:
+        _small_cache[key] = base.resize((int(base.width * scale), int(base.height * scale)), Image.LANCZOS)
+    img = _small_cache[key].copy().convert("RGBA")
+    cx, cy = int((BAR_CENTER_X + 3) * scale), int((BAR_TOP_Y - POPUP_UP + PAD) * scale)
+    full = POPUP_REAL * scale * percent / 100.0
+    ppu = POPUP_REAL * scale / max(1e-6, ref)
+    src = (picture.convert("RGBA") if picture is not None else _placeholder(160))
+    for p in poses:
+        w, h = int(round(full * p["sx"] / ref)), int(round(full * p["sy"] / ref))
+        if w < 2 or h < 2 or p["alpha"] <= 0.01:
+            continue
+        sp = Image.new("RGBA", src.size, (70, 70, 70, 255))
+        sp.alpha_composite(src)
+        sp = sp.resize((w, h), Image.BILINEAR)
+        if abs(p["rot"]) > 0.05:
+            sp = sp.rotate(-p["rot"], resample=Image.BILINEAR, expand=True)
+        if p["alpha"] < 0.999:
+            a = sp.getchannel("A").point(lambda v: int(v * p["alpha"]))
+            sp.putalpha(a)
+        x, y = int(round(cx + p["dx"] * ppu - sp.width / 2)), int(round(cy + p["dy"] * ppu - sp.height / 2))
+        _paste_clipped(img, sp, x, y)
+    o = ImageDraw.Draw(img, "RGBA")
+    o.rectangle((0, 0, img.width, 18), fill=(0, 0, 0, 150))
+    o.text((5, 3), caption, font=_font(10), fill=(255, 255, 255))
+    return img.convert("RGB")
+
+def _paste_clipped(img, sp, x, y):
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    layer.paste(sp, (x, y))
+    img.alpha_composite(layer)

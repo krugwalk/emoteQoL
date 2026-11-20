@@ -16,6 +16,7 @@ When a new version comes out, a bar at the top of the app tells you. Click Updat
 
 - Swap any emote for a picture, a GIF or a video. A trim bar under the editor lets you drag the edges to choose which part of a GIF or video is used
 - Make an emote bigger or smaller in game with the size slider. A live preview shows your picture, cropping, size and GIF speed above a champion as it will look in game
+- Choose how the popup comes in: fade in, pop in, bounce, squish, squiggle or jump in, or copy the animation of any other emote. The Pop up button next to the in-game preview plays it above the champion
 - Change just the sound of an emote, and hear a preview of how it will sound in League before saving. The preview uses the game's own mixer settings and your League volume settings
 - Change the loading screen and HUD portrait of any champion and skin
 - Open a `.fantome` you already have, look at the pictures, GIFs and sounds inside it, edit them and save, the rest of the file stays as it is

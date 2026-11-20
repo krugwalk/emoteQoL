@@ -207,17 +207,25 @@ def scale_popup(binbytes, vfx_path, factor):
     BP.RANGES.clear(); BP.parse(bytes(d))
     return bytes(d), changed
 
-def build_size_only(game, em, size, flat=False):
-    files = {}; notes = []; hits = 0; gone = 0
+def build_size_only(game, em, size, flat=False, style=None):
+    files = {}; notes = []; hits = 0; gone = 0; styled = 0
     for bh in emote_bins(game):
         d = game.read(bh)
         if d and em["vfx"].lower().encode() in d.lower():
+            if style:
+                from emoteqol.core import styles as PS
+                d, k = PS.apply_style(d, em["vfx"], style[0], style[1], _glow_map(game, em, style[1])); styled += k
             if flat: d, k = flatten_popup(d, em["vfx"]); gone += k
             nb, n = scale_popup(d, em["vfx"], max(1.0, float(size)) / 100.0)
-            if n or flat: files["%016x.bin" % bh] = nb; hits += n
+            if n or flat or styled: files["%016x.bin" % bh] = nb; hits += n
+    if style: notes.append("popup animation: %s" % (style[2] if len(style) > 2 else "copied from another emote") if styled else "popup animation: this popup's file could not take the animation")
     if flat: notes.append("flash and glow removed (%d layer(s))" % gone)
     notes.append("in-game size %d%%: %d popup layer(s) resized" % (size, hits) if hits else "in-game size: this popup has no size setting that can be changed")
     return files, notes
+
+def _glow_map(game, em, src_vfx):
+    if src_vfx.lower().endswith("_vfx.tex") and game.has(em["glow"].lower()): return {src_vfx[:-len("_vfx.tex")] + "_glow.tex": em["glow"]}
+    return {}
 
 def flipbook_info(binbytes, vfx_path):
     d = bytearray(binbytes); BP.RANGES.clear(); ents = BP.parse(bytes(d)); target = vfx_path.lower()
@@ -421,18 +429,25 @@ def make_sheet(frames, durs, cell=None, fit="contain", max_frames=64, adj=(100, 
         sheet.paste(fit_frame(frames[i], cell, fit, adj), ((k % cols) * cell, (k // cols) * cell))
     return sheet, cols, rows
 
-def build_replacement(game, em, image_path, animated=True, fit="contain", speed=100.0, progress=None, adj=(100, 0, 0), opacity=0, quality="compact", popup_size=100, preloaded=None, flat=False):
+def build_replacement(game, em, image_path, animated=True, fit="contain", speed=100.0, progress=None, adj=(100, 0, 0), opacity=0, quality="compact", popup_size=100, preloaded=None, flat=False, style=None):
     notes = []; frames, durs = preloaded if preloaded else load_frames(image_path); files = {}; best = quality == "best"; fmt = "BGRA8" if best else "DXT5"
     still = frames[0] if len(frames) == 1 else frames[len(frames) // 2]
     files[em["inv"].lower()] = encode_tex(fit_frame(still, 256, fit, adj), "DXT5", mips=False)
     if game.has(em["sel"].lower()): files[em["sel"].lower()] = encode_tex(fit_frame(still, 128, fit, adj), "DXT5", mips=False)
     if not game.has(em["vfx"].lower()): notes.append("this emote has no in-game popup texture; only its icons were replaced"); return files, notes
     hits = []
-    if (animated and len(frames) > 1) or opacity or popup_size != 100 or flat:
+    if (animated and len(frames) > 1) or opacity or popup_size != 100 or flat or style:
         for bh in emote_bins(game, progress):
             d = game.read(bh)
             if d and em["vfx"].lower().encode() in d.lower(): hits.append((bh, d))
     bins = {}
+    if style:
+        from emoteqol.core import styles as PS
+        done = 0
+        for i, (bh, d) in enumerate(hits):
+            nb, n = PS.apply_style(d, em["vfx"], style[0], style[1], _glow_map(game, em, style[1]))
+            if n: hits[i] = (bh, nb); bins[bh] = nb; done += n
+        notes.append("popup animation: %s" % (style[2] if len(style) > 2 else "copied from another emote") if done else "popup animation: this popup's file could not take the animation")
     if animated and len(frames) > 1:
         if not hits: notes.append("couldn't find this emote's popup effect, so the popup shows a still image"); animated = False
         else:
