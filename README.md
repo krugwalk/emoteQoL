@@ -13,6 +13,7 @@ Windows might warn about an unknown app because the exe isn't signed. Click "Mor
 ## What it does
 
 - Swap any emote for a picture, a GIF or a video
+- Make an emote bigger or smaller in game with the size slider
 - Change just the sound of an emote
 - Change the loading screen and HUD portrait of any champion and skin
 - Open a `.fantome` you already have and edit it, the rest of the file stays as it is

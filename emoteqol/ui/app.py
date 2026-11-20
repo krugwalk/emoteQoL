@@ -49,7 +49,9 @@ class App(tk.Tk):
         pr = ttk.Frame(right); pr.pack(fill="x", pady=4); ttk.Button(pr, text="Choose GIF / image / video...", command=self.pick_image).pack(side="left")
         self.vid_sound_v = tk.BooleanVar(value=False); self.vid_sound_cb = ttk.Checkbutton(pr, text="Use this video's sound", variable=self.vid_sound_v, command=self.toggle_video_sound, state="disabled"); self.vid_sound_cb.pack(side="left", padx=12)
         opt = ttk.LabelFrame(right, text="Options"); opt.pack(fill="x", pady=4)
-        self.anim_v = tk.BooleanVar(value=True); ttk.Checkbutton(opt, text="Animate in game (GIF -> flipbook)", variable=self.anim_v).grid(row=0, column=0, columnspan=3, sticky="w", padx=6)
+        self.anim_v = tk.BooleanVar(value=True); ttk.Checkbutton(opt, text="Animate in game (GIF -> flipbook)", variable=self.anim_v).grid(row=0, column=0, columnspan=2, sticky="w", padx=6)
+        self.size_v = tk.DoubleVar(value=100.0); self.size_lbl = ttk.Label(opt, text="In-game size: 100%", width=18); self.size_lbl.grid(row=0, column=2, sticky="e", padx=(14, 4))
+        ttk.Scale(opt, from_=20, to=200, variable=self.size_v, length=170, command=self._size_changed).grid(row=0, column=3, columnspan=2, sticky="w")
         ttk.Label(opt, text="Fit:").grid(row=1, column=0, sticky="w", padx=6); self.fit_v = tk.StringVar(value="contain"); cb = ttk.Combobox(opt, textvariable=self.fit_v, values=["contain", "cover", "stretch"], width=10, state="readonly"); cb.grid(row=1, column=1, sticky="w"); cb.bind("<<ComboboxSelected>>", lambda ev: self.refresh_preview())
         ttk.Label(opt, text="GIF speed (%):").grid(row=1, column=2, sticky="e", padx=(14, 4)); self.loops_v = tk.DoubleVar(value=100.0); ttk.Spinbox(opt, from_=10, to=500, increment=10, textvariable=self.loops_v, width=6).grid(row=1, column=3, sticky="w"); ttk.Label(opt, text="100 = the GIF's own speed", foreground="#666").grid(row=1, column=4, sticky="w", padx=6)
         ttk.Label(opt, text="Solidity:").grid(row=2, column=0, sticky="w", padx=6); self.opa_v = tk.StringVar(value="Normal (like the game)")
@@ -271,7 +273,9 @@ class App(tk.Tk):
         if not self.repl_frames: return
         self.cur_i = i % len(self.repl_frames); self.draw_editor()
         if len(self.repl_frames) > 1: self.anim_job = self.after(int(self.repl_durs[i % len(self.repl_durs)] * 1000), lambda: self.play(i + 1))
-    def update_add(self): self.add_btn.configure(state="normal" if (self.cur and self.game and (self.repl_path or self.sound_path or self.sound_game)) else "disabled")
+    def _size_changed(self, v=None):
+        r = int(round(float(self.size_v.get()) / 5.0) * 5); self.size_v.set(r); self.size_lbl.configure(text="In-game size: %d%%" % r); self.update_add()
+    def update_add(self): self.add_btn.configure(state="normal" if (self.cur and self.game and (self.repl_path or self.sound_path or self.sound_game or int(round(self.size_v.get())) != 100)) else "disabled")
     def _len_label(self):
         v = self.snd_max_v.get(); self.snd_len_lbl.configure(text="%.1f s of %.1f s%s" % (v, self.snd_total, "   (long sound effects get cut by the game)" if v > 8 else ""))
     def set_sound_file(self, path):
@@ -288,7 +292,7 @@ class App(tk.Tk):
 
     def add_to_pack(self):
         e = self.cur; path = self.repl_path; animated = self.anim_v.get(); fit = self.fit_v.get(); loops = float(self.loops_v.get()); adj = self.adj()
-        opa = {"Normal (like the game)": 0, "More solid (2 layers)": 1, "Very solid (3 layers)": 2}.get(self.opa_v.get(), 0); qual = "compact"
+        size = int(round(self.size_v.get())); opa = {"Normal (like the game)": 0, "More solid (2 layers)": 1, "Very solid (3 layers)": 2}.get(self.opa_v.get(), 0); qual = "compact"
         self.busy("Building the replacement for '%s'..." % e["name"]); self.add_btn.configure(state="disabled")
         spath = self.sound_path; sgame = self.sound_game
         try: smax = max(0.3, float(self.snd_max_v.get()))
@@ -296,7 +300,7 @@ class App(tk.Tk):
         try: sboost = min(24.0, max(-30.0, float(self.snd_boost_v.get())))
         except Exception: sboost = -5.0
         def job():
-            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual) if path else ({}, []); snd = None
+            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size) if path else (C.build_size_only(self.game, e, size) if size != 100 else ({}, [])); snd = None
             if spath or sgame:
                 from emoteqol.core import audio as A
                 ev = A.event_for_emote(self.game, e, C.emote_bins(self.game))
@@ -310,7 +314,7 @@ class App(tk.Tk):
         def done(r, err):
             self.update_add()
             if err: self.busy("Failed."); self.say("ERROR: " + err); return messagebox.showerror("Error", err[-600:])
-            files, notes, snd = r; self.pack.add(e, files, os.path.basename(path) if path else "(sound only)", "; ".join(notes))
+            files, notes, snd = r; self.pack.add(e, files, os.path.basename(path) if path else ("(size only)" if not spath and not sgame else "(sound only)"), "; ".join(notes))
             if snd: self.pack.sounds[e["key"]] = snd
             else: self.pack.sounds.pop(e["key"], None)
             self.say("%s: %s" % (e["name"], "; ".join(notes) or ("icons and popup replaced" if path else "nothing changed"))); self.refresh_pack(); self.busy("Added '%s' to the pack." % e["name"])

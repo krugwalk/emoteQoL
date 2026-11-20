@@ -10,7 +10,7 @@ if os.path.isdir(_OLD) and not os.path.exists(APPDATA):
     except Exception: pass
 os.makedirs(APPDATA, exist_ok=True)
 EMOTE_BIN = 0xf8ed8b424917d8f6
-FLAGS = dict(startframe=0x76f8ad24, delay=0x22e763bc, blend=0xfa784eab, texdiv=0x86a84509, count=0x1e67b0f1, rate=0x9b111ae4, tex=0x3c6468f4, life=0x2a552694, emlist=0x868eb76a, name=0x3d25b8ce)
+FLAGS = dict(birthscale=0xf0eb7084, startframe=0x76f8ad24, delay=0x22e763bc, blend=0xfa784eab, texdiv=0x86a84509, count=0x1e67b0f1, rate=0x9b111ae4, tex=0x3c6468f4, life=0x2a552694, emlist=0x868eb76a, name=0x3d25b8ce)
 
 def decode_tex(d):
     assert d[:4] == b"TEX\0", "not a TEX file"
@@ -171,6 +171,39 @@ def patch_flipbook(binbytes, vfx_path, cols, rows, fps):
     BP.RANGES.clear(); BP.parse(bytes(d))
     return bytes(d), n_ch, sorted(set(notes))
 
+def scale_popup(binbytes, vfx_path, factor):
+    d = bytearray(binbytes); BP.RANGES.clear(); ents = BP.parse(bytes(d)); changed = 0; target = vfx_path.lower()
+    for entry in ents:
+        if ents[entry][0] != 0x45cd899f: continue
+        BP.RANGES.clear(); BP.parse(bytes(d)); ln_off, lst = _spans(d, entry)
+        if not lst: continue
+        uses = False
+        for it in lst["items"]:
+            F = _fields(d, it["start"])
+            if FLAGS["tex"] in F:
+                ft, vs = F[FLAGS["tex"]]; n = struct.unpack_from("<H", d, vs)[0]
+                if bytes(d[vs + 2:vs + 2 + n]).decode("latin1").lower() == target: uses = True
+        if not uses: continue
+        for it in lst["items"]:
+            F = _fields(d, it["start"])
+            if FLAGS["birthscale"] not in F: continue
+            try: ft, vs = _fields(d, F[FLAGS["birthscale"]][1])[0xb4b427aa]
+            except KeyError: continue
+            if ft != 12: continue
+            x, y, z = struct.unpack_from("<3f", d, vs); struct.pack_into("<3f", d, vs, x * factor, y * factor, z * factor); changed += 1
+    BP.RANGES.clear(); BP.parse(bytes(d))
+    return bytes(d), changed
+
+def build_size_only(game, em, size):
+    files = {}; notes = []; hits = 0
+    for bh in emote_bins(game):
+        d = game.read(bh)
+        if d and em["vfx"].lower().encode() in d.lower():
+            nb, n = scale_popup(d, em["vfx"], max(1.0, float(size)) / 100.0)
+            if n: files["%016x.bin" % bh] = nb; hits += n
+    notes.append("in-game size %d%%: %d popup layer(s) resized" % (size, hits) if hits else "in-game size: this popup has no size setting that can be changed")
+    return files, notes
+
 def popup_length(binbytes, vfx_path):
     d = bytearray(binbytes); BP.RANGES.clear(); ents = BP.parse(bytes(d)); best = 0.0; target = vfx_path.lower()
     for entry in ents:
@@ -223,14 +256,14 @@ def make_sheet(frames, durs, cell=None, fit="contain", max_frames=64, adj=(100, 
         sheet.paste(fit_frame(frames[i], cell, fit, adj), ((k % cols) * cell, (k // cols) * cell))
     return sheet, cols, rows
 
-def build_replacement(game, em, image_path, animated=True, fit="contain", speed=100.0, progress=None, adj=(100, 0, 0), opacity=0, quality="compact"):
+def build_replacement(game, em, image_path, animated=True, fit="contain", speed=100.0, progress=None, adj=(100, 0, 0), opacity=0, quality="compact", popup_size=100):
     notes = []; frames, durs = load_frames(image_path); files = {}; best = quality == "best"; fmt = "BGRA8" if best else "DXT5"
     still = frames[0] if len(frames) == 1 else frames[len(frames) // 2]
     files[em["inv"].lower()] = encode_tex(fit_frame(still, 256, fit, adj), "DXT5", mips=False)
     if game.has(em["sel"].lower()): files[em["sel"].lower()] = encode_tex(fit_frame(still, 128, fit, adj), "DXT5", mips=False)
     if not game.has(em["vfx"].lower()): notes.append("this emote has no in-game popup texture; only its icons were replaced"); return files, notes
     hits = []
-    if (animated and len(frames) > 1) or opacity:
+    if (animated and len(frames) > 1) or opacity or popup_size != 100:
         for bh in emote_bins(game, progress):
             d = game.read(bh)
             if d and em["vfx"].lower().encode() in d.lower(): hits.append((bh, d))
@@ -257,6 +290,12 @@ def build_replacement(game, em, image_path, animated=True, fit="contain", speed=
             nb, n = boost_opacity(bins.get(bh, d), em["vfx"], int(opacity))
             if n: bins[bh] = nb; done += n
         notes.append("opacity: %d popup layer(s) stacked %dx so the picture is more solid" % (done, int(opacity) + 1) if done else "opacity: no stackable popup layer found")
+    if popup_size != 100:
+        done = 0
+        for bh, d in hits:
+            nb, n = scale_popup(bins.get(bh, d), em["vfx"], max(1.0, float(popup_size)) / 100.0)
+            if n: bins[bh] = nb; done += n
+        notes.append("in-game size %d%%: %d popup layer(s) resized" % (popup_size, done) if done else "in-game size: this popup has no size setting that can be changed")
     for bh, nb in bins.items(): files["%016x.bin" % bh] = nb
     return files, notes
 
