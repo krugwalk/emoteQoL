@@ -1,6 +1,6 @@
 # EmoteQoL
 
-Change League of Legends emotes, loading screens and HUD portraits with your own pictures, GIFs, videos and sounds. It saves a `.fantome` file that you import into LTK Manager like any other mod.
+Change League of Legends emotes, loading screens and HUD portraits with your own pictures, GIFs, videos and sounds. It saves a `.fantome` file that you import into a skin changer like [LTK Manager](https://github.com/LeagueToolkit/ltk-manager/releases/latest) (download it from its releases page) and turn on like any other mod.
 
 Not affiliated with Riot Games. Personal use only.
 
