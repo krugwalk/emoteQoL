@@ -32,14 +32,6 @@ def make_shortcut(lnk, target, icon, workdir):
           % (lnk.replace("'", "''"), target.replace("'", "''"), icon.replace("'", "''"), workdir.replace("'", "''")))
     subprocess.run(["powershell", "-NoProfile", "-Command", ps], check=True, timeout=30, creationflags=0x08000000)
 
-def remove_old_version():
-    try:
-        old = os.path.join(desktop_dir(), "Emote Maker.lnk")
-        if os.path.exists(old): os.remove(old)
-    except Exception: pass
-    try: shutil.rmtree(os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "Programs", "EmoteMaker"), ignore_errors=True)
-    except Exception: pass
-
 def do_install(final_dir, shortcut=True, dest=None):
     d = dest or install_dir(); os.makedirs(d, exist_ok=True); dst = os.path.join(d, APP + ".exe")
     if os.path.normcase(exe_path()) != os.path.normcase(dst): shutil.copy2(exe_path(), dst)
@@ -52,7 +44,6 @@ def do_install(final_dir, shortcut=True, dest=None):
     if os.path.normcase(exe_path()) != os.path.normcase(dst): s["source_exe"] = exe_path()
     os.makedirs(C.APPDATA, exist_ok=True); json.dump(s, open(os.path.join(C.APPDATA, "settings.json"), "w"))
     if shortcut: make_shortcut(os.path.join(desktop_dir(), APP + ".lnk"), dst, ico, d)
-    remove_old_version()
     return dst
 
 def maybe_update():

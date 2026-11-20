@@ -4,11 +4,7 @@ from PIL import Image, ImageSequence
 from emoteqol.formats import wad as wadtool; from emoteqol.formats import binparse as BP
 
 DEFAULT_GAME = r"C:\Riot Games\League of Legends\Game\DATA\FINAL"
-_BASE = os.environ.get("APPDATA", os.path.expanduser("~")); APPDATA = os.path.join(_BASE, "EmoteQoL"); _OLD = os.path.join(_BASE, "EmoteMaker")
-if os.path.isdir(_OLD) and not os.path.exists(APPDATA):
-    try: shutil.copytree(_OLD, APPDATA)
-    except Exception: pass
-os.makedirs(APPDATA, exist_ok=True)
+APPDATA = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "EmoteQoL"); os.makedirs(APPDATA, exist_ok=True)
 EMOTE_BIN = 0xf8ed8b424917d8f6
 FLAGS = dict(emitrate=0xae839c67, birthscale=0xf0eb7084, startframe=0x76f8ad24, delay=0x22e763bc, blend=0xfa784eab, texdiv=0x86a84509, count=0x1e67b0f1, rate=0x9b111ae4, tex=0x3c6468f4, life=0x2a552694, emlist=0x868eb76a, name=0x3d25b8ce)
 
@@ -501,7 +497,7 @@ def import_fantome(path, catalogue):
     try: p.info.update(json.loads(z.read("META/info.json")))
     except Exception: pass
     meta = {}
-    try: meta = json.loads(z.read("META/emotemaker.json"))
+    try: meta = json.loads(z.read("META/emoteqol.json" if "META/emoteqol.json" in z.namelist() else "META/emotemaker.json"))
     except Exception: pass
     p.silence_pop = bool(meta.get("_options", {}).get("silence_pop", False)); groups = {}; art_meta = meta.get("_art", {})
     for n in z.namelist():
@@ -511,7 +507,7 @@ def import_fantome(path, catalogue):
             wp = n[len(GLOBAL_DIR):].lower(); base = re.sub(r"_(inventory|selector|vfx|glow)\.tex$", "", wp)
             if base in {k.lower()[len("assets/"):] if False else k.lower() for k in by_base}: groups.setdefault(base, {})[wp] = z.read(n)
             else: p.other[n] = z.read(n)
-        elif n == "META/info.json" or n == "META/emotemaker.json": continue
+        elif n in ("META/info.json", "META/emoteqol.json", "META/emotemaker.json"): continue
         else: p.other[n] = z.read(n)
     for base, files in groups.items():
         e = by_base[base]; p.emotes[e["key"]] = dict(name=e["name"], inv=e["inv"], files=files, source=meta.get(e["key"], {}).get("source", "(from imported file)"), note=meta.get(e["key"], {}).get("note", ""), settings=meta.get(e["key"], {}).get("settings"))
@@ -549,7 +545,7 @@ def export_fantome(pack, path, image_bytes=None, game=None):
             if e.get("settings"): meta[key]["settings"] = e["settings"]
             if key in pack.sounds: meta[key]["sound"] = dict(source=pack.sounds[key]["source"], event=pack.sounds[key]["event"])
         meta["_options"] = dict(silence_pop=pop); meta["_art"] = {k: dict(name=a["name"], files=list(a["files"]), source=a.get("source", ""), note=a.get("note", "")) for k, a in pack.art.items()}
-        z.writestr("META/info.json", json.dumps(pack.info, indent=2)); z.writestr("META/emotemaker.json", json.dumps(meta, indent=2))
+        z.writestr("META/info.json", json.dumps(pack.info, indent=2)); z.writestr("META/emoteqol.json", json.dumps(meta, indent=2))
         if image_bytes: z.writestr("META/image.png", image_bytes)
 
 def resolve_final(path):
