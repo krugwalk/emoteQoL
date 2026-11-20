@@ -57,12 +57,6 @@ class App(tk.Tk):
         self.size_scale.bind("<ButtonPress-1>", self._size_press, add="+"); self.size_scale.bind("<ButtonRelease-1>", self._size_release, add="+")
         ttk.Label(opt, text="Fit:").grid(row=1, column=0, sticky="w", padx=6); self.fit_v = tk.StringVar(value="contain"); cb = ttk.Combobox(opt, textvariable=self.fit_v, values=["contain", "cover", "stretch"], width=10, state="readonly"); cb.grid(row=1, column=1, sticky="w"); cb.bind("<<ComboboxSelected>>", lambda ev: self.refresh_preview())
         ttk.Label(opt, text="GIF speed (%):").grid(row=1, column=2, sticky="e", padx=(14, 4)); self.loops_v = tk.DoubleVar(value=100.0); ttk.Spinbox(opt, from_=10, to=500, increment=10, textvariable=self.loops_v, width=6).grid(row=1, column=3, sticky="w"); ttk.Label(opt, text="100 = the GIF's own speed", foreground="#666").grid(row=1, column=4, sticky="w", padx=6)
-        ttk.Label(opt, text="Solidity:").grid(row=2, column=0, sticky="w", padx=6); self.opa_v = tk.StringVar(value="Very solid (3 layers)")
-        ttk.Combobox(opt, textvariable=self.opa_v, values=["Normal (like the game)", "More solid (2 layers)", "Very solid (3 layers)"], width=21, state="readonly").grid(row=2, column=1, columnspan=2, sticky="w")
-        ttk.Label(opt, text="Flash / glow:").grid(row=2, column=3, sticky="e", padx=(14, 4)); self.flat_v = tk.StringVar(value="Remove")
-        ttk.Combobox(opt, textvariable=self.flat_v, values=["Remove", "Keep (like the game)"], width=18, state="readonly").grid(row=2, column=4, sticky="w")
-        self.bright_v = tk.DoubleVar(value=100.0); self.bright_lbl = ttk.Label(opt, text="Brightness: 100%", width=18); self.bright_lbl.grid(row=3, column=0, columnspan=2, sticky="w", padx=6)
-        ttk.Scale(opt, from_=40, to=120, variable=self.bright_v, length=200, command=self._bright_changed).grid(row=3, column=2, columnspan=3, sticky="w")
         sz = ttk.Frame(right); sz.pack(fill="x", pady=2); ttk.Button(sz, text="Reset position / size", command=self.reset_adj).pack(side="left", padx=6)
         ttk.Label(sz, text="Edges stretch, corners keep proportions (Shift = free), wheel zooms.", foreground="#666", wraplength=470).pack(side="left", padx=6)
         sl = ttk.Frame(right); sl.pack(fill="x", pady=2); ttk.Label(sl, text="Sound length:").pack(side="left", padx=6)
@@ -281,8 +275,6 @@ class App(tk.Tk):
         if not self.repl_frames: return
         self.cur_i = i % len(self.repl_frames); self.draw_editor()
         if len(self.repl_frames) > 1: self.anim_job = self.after(int(self.repl_durs[i % len(self.repl_durs)] * 1000), lambda: self.play(i + 1))
-    def _bright_changed(self, v=None):
-        r = int(round(float(self.bright_v.get()) / 5.0) * 5); self.bright_v.set(r); self.bright_lbl.configure(text="Brightness: %d%%" % r)
     def _size_changed(self, v=None):
         r = int(round(float(self.size_v.get()) / 5.0) * 5); self.size_v.set(r); self.size_lbl.configure(text="In-game size: %d%%" % r); self.update_add()
         if self.size_down: self._size_show()
@@ -308,7 +300,7 @@ class App(tk.Tk):
 
     def add_to_pack(self):
         e = self.cur; path = self.repl_path; animated = self.anim_v.get(); fit = self.fit_v.get(); loops = float(self.loops_v.get()); adj = self.adj()
-        bright = int(round(self.bright_v.get())); size = int(round(self.size_v.get())); flat = self.flat_v.get() == "Remove"; opa = {"Normal (like the game)": 0, "More solid (2 layers)": 1, "Very solid (3 layers)": 2}.get(self.opa_v.get(), 0); qual = "compact"
+        size = int(round(self.size_v.get())); flat = True; opa = 2; qual = "compact"
         self.busy("Building the replacement for '%s'..." % e["name"]); self.add_btn.configure(state="disabled")
         spath = self.sound_path; sgame = self.sound_game; keep = self.sound_keep if not (self.sound_path or self.sound_game) else None; mem = self.mem_frames if (self.mem_frames and path == self.repl_path) else None
         try: smax = max(0.3, float(self.snd_max_v.get()))
@@ -316,7 +308,7 @@ class App(tk.Tk):
         try: sboost = min(24.0, max(-30.0, float(self.snd_boost_v.get())))
         except Exception: sboost = -5.0
         def job():
-            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, mem, flat, bright) if path else (C.build_size_only(self.game, e, size, flat) if size != 100 else ({}, [])); snd = None
+            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, mem, flat) if path else (C.build_size_only(self.game, e, size, flat) if size != 100 else ({}, [])); snd = None
             if spath or sgame:
                 from emoteqol.core import audio as A
                 ev = A.event_for_emote(self.game, e, C.emote_bins(self.game))
@@ -445,7 +437,6 @@ class App(tk.Tk):
         self.repl_path = "(from the pack) " + em["name"]; self.fit_v.set("stretch"); self.loops_v.set(100.0)
         try: size, layers, flat = C.popup_settings(self.game, em, self.pack.emotes[em["key"]]["files"], self.pack.other)
         except Exception: size, layers, flat = 100, 0, False
-        self.flat_v.set("Remove" if flat else "Keep (like the game)")
         self.sound_keep = None
         try: snd = A.detect_pack_sound(self.game, em, self.pack.emotes[em["key"]]["files"], self.pack.other)
         except Exception: snd = None
@@ -453,8 +444,7 @@ class App(tk.Tk):
             self.sound_keep = snd
             if snd["level"] is not None: self.snd_boost_v.set(snd["level"])
             self.sound_lbl.configure(text="keeping the sound already in the pack%s (pick another to replace it)" % ((", %.1f s" % snd["seconds"]) if snd["seconds"] else ""))
-        self.bright_v.set(100); self._bright_changed()
-        self.size_v.set(size); self._size_changed(); self.opa_v.set(["Normal (like the game)", "More solid (2 layers)", "Very solid (3 layers)"][layers])
+        self.size_v.set(size); self._size_changed()
         self.src_lbl.configure(text="%s   (%d frame%s, loaded from the pack - move, stretch or change it, then press Add)" % (em["name"], len(self.repl_frames), "" if len(self.repl_frames) == 1 else "s"))
         self.reset_adj(); self.play(0); self.update_add(); self.busy("Loaded '%s' from the pack into the editor." % em["name"])
     def remove_selected(self):

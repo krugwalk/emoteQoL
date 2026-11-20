@@ -1,6 +1,6 @@
 import json, re, threading, urllib.request
 
-VERSION = "1.7.0"
+VERSION = "1.7.1"
 REPO = "krugwalk/emoteQoL"
 API = "https://api.github.com/repos/%s/releases/latest" % REPO
 

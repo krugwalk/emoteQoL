@@ -353,11 +353,6 @@ def boost_opacity(binbytes, vfx_path, copies=1):
     BP.RANGES.clear(); BP.parse(bytes(d))
     return bytes(d), n_dup
 
-def dim(img, percent):
-    if percent == 100: return img
-    a = np.asarray(img.convert("RGBA"), dtype=np.float32); a[..., :3] = np.clip(a[..., :3] * (percent / 100.0), 0, 255)
-    return Image.fromarray(a.astype(np.uint8), "RGBA")
-
 def make_sheet(frames, durs, cell=None, fit="contain", max_frames=64, adj=(100, 0, 0), max_width=2048, t_end=None):
     ends = np.cumsum(durs); tot = float(ends[-1])
     if t_end: tot = min(tot, float(t_end)); frames = frames[:int(np.searchsorted(ends, tot, side="left")) + 1]
@@ -372,7 +367,7 @@ def make_sheet(frames, durs, cell=None, fit="contain", max_frames=64, adj=(100, 
         sheet.paste(fit_frame(frames[i], cell, fit, adj), ((k % cols) * cell, (k // cols) * cell))
     return sheet, cols, rows
 
-def build_replacement(game, em, image_path, animated=True, fit="contain", speed=100.0, progress=None, adj=(100, 0, 0), opacity=0, quality="compact", popup_size=100, preloaded=None, flat=False, brightness=100):
+def build_replacement(game, em, image_path, animated=True, fit="contain", speed=100.0, progress=None, adj=(100, 0, 0), opacity=0, quality="compact", popup_size=100, preloaded=None, flat=False):
     notes = []; frames, durs = preloaded if preloaded else load_frames(image_path); files = {}; best = quality == "best"; fmt = "BGRA8" if best else "DXT5"
     still = frames[0] if len(frames) == 1 else frames[len(frames) // 2]
     files[em["inv"].lower()] = encode_tex(fit_frame(still, 256, fit, adj), "DXT5", mips=False)
@@ -394,12 +389,12 @@ def build_replacement(game, em, image_path, animated=True, fit="contain", speed=
             for bh, d in hits:
                 nb, n, nn = patch_flipbook(d, em["vfx"], cols, rows, fps); notes += nn
                 if n: bins[bh] = nb; changed += n
-            if changed: files[em["vfx"].lower()] = encode_tex(dim(sheet, brightness), fmt, mips=not best); notes.append("animated: %d frames of %d px covering the first %.1f s of the clip, %d popup emitter(s)" % (cols * rows, sheet.width // cols, window, changed))
+            if changed: files[em["vfx"].lower()] = encode_tex(sheet, fmt, mips=not best); notes.append("animated: %d frames of %d px covering the first %.1f s of the clip, %d popup emitter(s)" % (cols * rows, sheet.width // cols, window, changed))
             else: notes.append("popup effect has no usable emitter, so the popup shows a still image"); animated = False
     if not animated or len(frames) == 1:
         if em["vfx"].lower() not in files:
             size = 256 if best else 512
-            files[em["vfx"].lower()] = encode_tex(dim(fit_frame(still, size, fit, adj), brightness), fmt, mips=not best)
+            files[em["vfx"].lower()] = encode_tex(fit_frame(still, size, fit, adj), fmt, mips=not best)
     if opacity:
         done = 0
         for bh, d in hits:

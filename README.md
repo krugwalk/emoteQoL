@@ -14,7 +14,6 @@ Windows might warn about an unknown app because the exe isn't signed. Click "Mor
 
 - Swap any emote for a picture, a GIF or a video
 - Make an emote bigger or smaller in game with the size slider
-- Remove the stock flash and green glow around the picture and make it solid, with a brightness slider, so it isn't washed out
 - Change just the sound of an emote
 - Change the loading screen and HUD portrait of any champion and skin
 - Open a `.fantome` you already have, look at the pictures, GIFs and sounds inside it, edit them and save, the rest of the file stays as it is
