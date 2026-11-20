@@ -92,12 +92,46 @@ def detect_pack_sound(game, em, files, other):
                 oo = _volume_prop(ob, oobjs, sid); out["orig_level"] = struct.unpack_from("<f", ob, oo)[0] if oo else 0.0
     return out
 
+PREVIEW_LIFT_DB = 6.0
+
+def preview_wav(path, max_seconds, level_db, wem=None, wem_level=None):
+    import numpy as np
+    out_path = tempfile.mktemp(suffix=".wav")
+    if wem is not None:
+        src = tempfile.mktemp(suffix=".wav")
+        if not wem_to_wav(wem, src): return None
+        w = wave.open(src); x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float64) / 32768.0; ch = w.getnchannels(); w.close(); os.remove(src)
+        if ch > 1: x = x.reshape(-1, ch).mean(axis=1)
+        level = wem_level if wem_level is not None else 0.0
+    else:
+        if path.lower().endswith(".wem"):
+            d = open(path, "rb").read(); tmp = tempfile.mktemp(suffix=".wav")
+            if not wem_to_wav(d, tmp): return None
+            w = wave.open(tmp); x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float64) / 32768.0; ch = w.getnchannels(); w.close(); os.remove(tmp)
+            if ch > 1: x = x.reshape(-1, ch).mean(axis=1)
+            x = x[:int(max_seconds * RATE)]
+        else:
+            pcm = load_pcm(path)[:int(max_seconds * RATE)]; tmp = tempfile.mktemp(suffix=".wav"); _write_wav(tmp, pcm, -4.0, DYN_RATIOS["Evened out"])
+            w = wave.open(tmp); x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float64) / 32768.0; w.close(); os.remove(tmp)
+        level = level_db
+    y = np.clip(x * 10 ** ((level + PREVIEW_LIFT_DB) / 20.0), -1.0, 1.0)
+    w = wave.open(out_path, "wb"); w.setnchannels(1); w.setsampwidth(2); w.setframerate(RATE); w.writeframes((y * 32000).astype(np.int16).tobytes()); w.close()
+    return out_path
+
+def first_audible_wem(game, event_name):
+    cw = common_wad(game); ob = cw.read(SFX_BNK); ow = cw.read(SFX_WPK); secs, objs = bank.parse_bank(ob); entries = {e[0]: e for e in wpk.parse_wpk(ow) if e}
+    for sid, mid in event_sounds(ob, event_name) or []:
+        o = _volume_prop(ob, objs, sid); v = struct.unpack_from("<f", ob, o)[0] if o else 0.0
+        e = entries.get("%d.wem" % mid)
+        if e and v > -60: return ow[e[1]:e[1] + e[2]], v
+    return None, None
+
 def wem_to_wav(wem, path):
     vg = _vgmstream()
     if not vg: return False
     tmp = tempfile.mktemp(suffix=".wem"); open(tmp, "wb").write(wem)
     try:
-        subprocess.run([vg, "-o", path, tmp], check=True, capture_output=True, creationflags=0x08000000); return os.path.exists(path)
+        subprocess.run([vg, "-o", path, tmp], check=True, capture_output=True, stdin=subprocess.DEVNULL, timeout=30, creationflags=0x08000000); return os.path.exists(path)
     except Exception: return False
     finally:
         if os.path.exists(tmp): os.remove(tmp)
@@ -163,7 +197,7 @@ def load_pcm(path):
     if ff:
         tmp = tempfile.mktemp(suffix=".wav")
         try:
-            subprocess.run([ff, "-y", "-v", "error", "-i", path, "-vn", "-ac", "1", "-ar", str(RATE), "-sample_fmt", "s16", tmp], check=True, capture_output=True, creationflags=0x08000000)
+            subprocess.run([ff, "-y", "-v", "error", "-i", path, "-vn", "-ac", "1", "-ar", str(RATE), "-sample_fmt", "s16", tmp], check=True, capture_output=True, stdin=subprocess.DEVNULL, timeout=120, creationflags=0x08000000)
             return _read_wav(tmp)
         finally:
             if os.path.exists(tmp): os.remove(tmp)
@@ -171,7 +205,7 @@ def load_pcm(path):
     if vg and ext != ".wav":
         tmp = tempfile.mktemp(suffix=".wav")
         try:
-            subprocess.run([vg, "-o", tmp, path], check=True, capture_output=True, creationflags=0x08000000); return _read_wav(_to_mono_44k(tmp))
+            subprocess.run([vg, "-o", tmp, path], check=True, capture_output=True, stdin=subprocess.DEVNULL, timeout=60, creationflags=0x08000000); return _read_wav(_to_mono_44k(tmp))
         except Exception: pass
         finally:
             if os.path.exists(tmp): os.remove(tmp)
@@ -274,7 +308,7 @@ def wwise_convert(wc, proj, pcm, boost_db=-4.0, ratio=1.0):
         ws = os.path.join(work, "clip.wsources")
         xml = ["<?xml version=\"1.0\" encoding=\"UTF-8\"?>", "<ExternalSourcesList SchemaVersion=\"1\" Root=\"%s\">" % inp, "\t<Source Path=\"clip.wav\" Conversion=\"Vorbis Quality High\" />", "</ExternalSourcesList>"]
         open(ws, "w", encoding="utf-8").write("\n".join(xml))
-        r = subprocess.run([wc, "convert-external-source", proj, "--source-file", ws, "--output", out], capture_output=True, text=True, timeout=180, creationflags=0x08000000)
+        r = subprocess.run([wc, "convert-external-source", proj, "--source-file", ws, "--output", out], capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=180, creationflags=0x08000000)
         for dp, dns, fns in os.walk(out):
             for f in fns:
                 if f.lower().endswith(".wem"): return open(os.path.join(dp, f), "rb").read()
