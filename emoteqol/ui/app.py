@@ -4,6 +4,7 @@ from tkinter import ttk, filedialog, messagebox
 from PIL import Image, ImageTk
 from emoteqol.core import emotes as C
 from emoteqol.ui import skin_tab
+from emoteqol.ui import size_preview
 from emoteqol import updater
 
 SETTINGS = os.path.join(C.APPDATA, "settings.json")
@@ -51,7 +52,9 @@ class App(tk.Tk):
         opt = ttk.LabelFrame(right, text="Options"); opt.pack(fill="x", pady=4)
         self.anim_v = tk.BooleanVar(value=True); ttk.Checkbutton(opt, text="Animate in game (GIF -> flipbook)", variable=self.anim_v).grid(row=0, column=0, columnspan=2, sticky="w", padx=6)
         self.size_v = tk.DoubleVar(value=100.0); self.size_lbl = ttk.Label(opt, text="In-game size: 100%", width=18); self.size_lbl.grid(row=0, column=2, sticky="e", padx=(14, 4))
-        ttk.Scale(opt, from_=20, to=200, variable=self.size_v, length=170, command=self._size_changed).grid(row=0, column=3, columnspan=2, sticky="w")
+        self.size_scale = ttk.Scale(opt, from_=20, to=200, variable=self.size_v, length=170, command=self._size_changed); self.size_scale.grid(row=0, column=3, columnspan=2, sticky="w")
+        self.size_pv = size_preview.SizePreview(self); self.size_down = False
+        self.size_scale.bind("<ButtonPress-1>", self._size_press, add="+"); self.size_scale.bind("<ButtonRelease-1>", self._size_release, add="+")
         ttk.Label(opt, text="Fit:").grid(row=1, column=0, sticky="w", padx=6); self.fit_v = tk.StringVar(value="contain"); cb = ttk.Combobox(opt, textvariable=self.fit_v, values=["contain", "cover", "stretch"], width=10, state="readonly"); cb.grid(row=1, column=1, sticky="w"); cb.bind("<<ComboboxSelected>>", lambda ev: self.refresh_preview())
         ttk.Label(opt, text="GIF speed (%):").grid(row=1, column=2, sticky="e", padx=(14, 4)); self.loops_v = tk.DoubleVar(value=100.0); ttk.Spinbox(opt, from_=10, to=500, increment=10, textvariable=self.loops_v, width=6).grid(row=1, column=3, sticky="w"); ttk.Label(opt, text="100 = the GIF's own speed", foreground="#666").grid(row=1, column=4, sticky="w", padx=6)
         ttk.Label(opt, text="Solidity:").grid(row=2, column=0, sticky="w", padx=6); self.opa_v = tk.StringVar(value="Normal (like the game)")
@@ -275,6 +278,12 @@ class App(tk.Tk):
         if len(self.repl_frames) > 1: self.anim_job = self.after(int(self.repl_durs[i % len(self.repl_durs)] * 1000), lambda: self.play(i + 1))
     def _size_changed(self, v=None):
         r = int(round(float(self.size_v.get()) / 5.0) * 5); self.size_v.set(r); self.size_lbl.configure(text="In-game size: %d%%" % r); self.update_add()
+        if self.size_down: self._size_show()
+    def _size_show(self):
+        pic = self.edit_src[self.cur_i % len(self.edit_src)] if self.edit_src else None
+        self.size_pv.show(int(round(self.size_v.get())), pic, (self.size_scale.winfo_rootx() - 70, self.size_scale.winfo_rooty() + 30))
+    def _size_press(self, ev): self.size_down = True; self.after(1, self._size_show)
+    def _size_release(self, ev): self.size_down = False; self.size_pv.hide()
     def update_add(self): self.add_btn.configure(state="normal" if (self.cur and self.game and (self.repl_path or self.sound_path or self.sound_game or int(round(self.size_v.get())) != 100)) else "disabled")
     def _len_label(self):
         v = self.snd_max_v.get(); self.snd_len_lbl.configure(text="%.1f s of %.1f s%s" % (v, self.snd_total, "   (long sound effects get cut by the game)" if v > 8 else ""))
