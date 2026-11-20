@@ -204,6 +204,42 @@ def build_size_only(game, em, size):
     notes.append("in-game size %d%%: %d popup layer(s) resized" % (size, hits) if hits else "in-game size: this popup has no size setting that can be changed")
     return files, notes
 
+def flipbook_info(binbytes, vfx_path):
+    d = bytearray(binbytes); BP.RANGES.clear(); ents = BP.parse(bytes(d)); target = vfx_path.lower()
+    for entry in ents:
+        if ents[entry][0] != 0x45cd899f: continue
+        BP.RANGES.clear(); BP.parse(bytes(d)); ln_off, lst = _spans(d, entry)
+        if not lst: continue
+        for it in lst["items"]:
+            F = _fields(d, it["start"])
+            if FLAGS["tex"] not in F or FLAGS["texdiv"] not in F or FLAGS["count"] not in F: continue
+            ft, vs = F[FLAGS["tex"]]; n = struct.unpack_from("<H", d, vs)[0]
+            if bytes(d[vs + 2:vs + 2 + n]).decode("latin1").lower() != target: continue
+            div = BP.value(BP.R(bytes(d), F[FLAGS["texdiv"]][1]), F[FLAGS["texdiv"]][0]); count = BP.value(BP.R(bytes(d), F[FLAGS["count"]][1]), F[FLAGS["count"]][0])
+            fps = BP.value(BP.R(bytes(d), F[FLAGS["rate"]][1]), F[FLAGS["rate"]][0]) if FLAGS["rate"] in F else None
+            cols, rows = int(round(div[0])), int(round(div[1]))
+            if cols >= 1 and rows >= 1 and count >= 1: return cols, rows, int(count), (float(fps) if fps else None)
+    return None
+
+def extract_frames(em, files, other):
+    key = em["vfx"].lower()
+    tex = files.get(key)
+    if tex is None:
+        tex = next((v for k, v in files.items() if k.lower().endswith(".tex") and ("vfx" in k.lower() or "vf2" in k.lower())), None)
+    if tex is None: return None
+    sheet = decode_tex(tex); info = None
+    sources = list(files.items()) + [(n, d) for n, d in other.items()]
+    for name, data in sources:
+        if name.lower().endswith(".bin") and isinstance(data, (bytes, bytearray)) and key.encode() in bytes(data).lower():
+            try: info = flipbook_info(data, em["vfx"])
+            except Exception: info = None
+            if info: break
+    if not info: return [sheet], [0.1], None
+    cols, rows, count, fps = info; cw, ch = sheet.width // cols, sheet.height // rows
+    frames = [sheet.crop(((i % cols) * cw, (i // cols) * ch, (i % cols) * cw + cw, (i // cols) * ch + ch)) for i in range(min(count, cols * rows))]
+    step = 1.0 / fps if fps else 1.0 / 12.0
+    return frames, [step] * len(frames), fps
+
 def popup_length(binbytes, vfx_path):
     d = bytearray(binbytes); BP.RANGES.clear(); ents = BP.parse(bytes(d)); best = 0.0; target = vfx_path.lower()
     for entry in ents:
@@ -256,8 +292,8 @@ def make_sheet(frames, durs, cell=None, fit="contain", max_frames=64, adj=(100, 
         sheet.paste(fit_frame(frames[i], cell, fit, adj), ((k % cols) * cell, (k // cols) * cell))
     return sheet, cols, rows
 
-def build_replacement(game, em, image_path, animated=True, fit="contain", speed=100.0, progress=None, adj=(100, 0, 0), opacity=0, quality="compact", popup_size=100):
-    notes = []; frames, durs = load_frames(image_path); files = {}; best = quality == "best"; fmt = "BGRA8" if best else "DXT5"
+def build_replacement(game, em, image_path, animated=True, fit="contain", speed=100.0, progress=None, adj=(100, 0, 0), opacity=0, quality="compact", popup_size=100, preloaded=None):
+    notes = []; frames, durs = preloaded if preloaded else load_frames(image_path); files = {}; best = quality == "best"; fmt = "BGRA8" if best else "DXT5"
     still = frames[0] if len(frames) == 1 else frames[len(frames) // 2]
     files[em["inv"].lower()] = encode_tex(fit_frame(still, 256, fit, adj), "DXT5", mips=False)
     if game.has(em["sel"].lower()): files[em["sel"].lower()] = encode_tex(fit_frame(still, 128, fit, adj), "DXT5", mips=False)

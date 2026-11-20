@@ -17,7 +17,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__(); self.title("EmoteQoL v%s - emotes, loading screens and HUD portraits with your own pictures" % updater.VERSION); self.geometry("1180x1050"); self.minsize(1000, 800)
         self.set = load_settings(); self.game = None; self.cat = []; self.cur = None; self.pack = C.Pack(); self.icons = {}; self.photo_refs = {}; self.q = queue.Queue()
-        self.cur_i = 0; self.repl_path = None; self.repl_frames = []; self.repl_durs = []; self.anim_job = None; self.matches = []
+        self.cur_i = 0; self.repl_path = None; self.mem_frames = None; self.repl_frames = []; self.repl_durs = []; self.anim_job = None; self.matches = []
         self._ui(); self.after(100, self._poll); self.after(200, self.open_game); self.after(2500, lambda: updater.check_async(lambda r: self.q.put(lambda: self.show_update(r))))
 
     def _ui(self):
@@ -27,7 +27,7 @@ class App(tk.Tk):
         top = ttk.Frame(self); top.pack(fill="x", padx=8, pady=6); self.top_frame = top
         self.game_lbl = ttk.Label(top, text="Game folder: (not set)"); self.game_lbl.pack(side="left"); ttk.Button(top, text="Change...", command=self.pick_game).pack(side="left", padx=8)
         ttk.Button(top, text="Open .fantome...", command=self.open_fantome).pack(side="right"); ttk.Button(top, text="New pack", command=self.new_pack).pack(side="right", padx=6)
-        nb = ttk.Notebook(self); tab_e = ttk.Frame(nb); nb.add(tab_e, text="  Emotes  ")
+        nb = ttk.Notebook(self); self.nb = nb; tab_e = ttk.Frame(nb); nb.add(tab_e, text="  Emotes  ")
         main = ttk.PanedWindow(tab_e, orient="horizontal"); main.pack(fill="both", expand=True, padx=4, pady=4)
         left = ttk.Frame(main); main.add(left, weight=1)
         sf = ttk.Frame(left); sf.pack(fill="x"); ttk.Label(sf, text="Search emotes:").pack(side="left"); self.sv = tk.StringVar(); self.sv.trace_add("write", lambda *a: self.refilter())
@@ -79,7 +79,8 @@ class App(tk.Tk):
         self.ptree = ttk.Treeview(bot, columns=("src", "note"), show="tree headings", height=3); self.ptree.heading("#0", text="Emote replaced"); self.ptree.heading("src", text="Replacement"); self.ptree.heading("note", text="Notes")
         self.ptree.column("#0", width=230); self.ptree.column("src", width=220); self.ptree.column("note", width=520); self.ptree.pack(fill="x", padx=4, pady=4)
         r2 = ttk.Frame(bot); r2.pack(fill="x", padx=4, pady=4)
-        ttk.Button(r2, text="Remove selected", command=self.remove_selected).pack(side="left")
+        ttk.Button(r2, text="Remove selected", command=self.remove_selected).pack(side="left"); ttk.Button(r2, text="View / edit selected", command=self.view_selected).pack(side="left", padx=6)
+        self.ptree.bind("<Double-Button-1>", self.view_selected)
         self.name_v, self.auth_v, self.lic_v = tk.StringVar(value="My Emotes"), tk.StringVar(), tk.StringVar()
         for lab, v, w in (("Name", self.name_v, 18), ("Author", self.auth_v, 14), ("License", self.lic_v, 12)):
             ttk.Label(r2, text="  " + lab + ":").pack(side="left"); ttk.Entry(r2, textvariable=v, width=w).pack(side="left")
@@ -189,6 +190,7 @@ class App(tk.Tk):
         return self.photo_refs[k]
 
     def pick_image(self):
+        self.mem_frames = None
         p = filedialog.askopenfilename(title="Choose a GIF, image or video", filetypes=[("GIF / images / video", "*.gif *.png *.jpg *.jpeg *.webp *.bmp *.mp4 *.webm *.mov *.mkv *.avi *.m4v"), ("All files", "*.*")])
         if not p: return
         try: self.repl_frames, self.repl_durs = C.load_frames(p)
@@ -303,13 +305,13 @@ class App(tk.Tk):
         e = self.cur; path = self.repl_path; animated = self.anim_v.get(); fit = self.fit_v.get(); loops = float(self.loops_v.get()); adj = self.adj()
         size = int(round(self.size_v.get())); opa = {"Normal (like the game)": 0, "More solid (2 layers)": 1, "Very solid (3 layers)": 2}.get(self.opa_v.get(), 0); qual = "compact"
         self.busy("Building the replacement for '%s'..." % e["name"]); self.add_btn.configure(state="disabled")
-        spath = self.sound_path; sgame = self.sound_game
+        spath = self.sound_path; sgame = self.sound_game; mem = self.mem_frames if (self.mem_frames and path == self.repl_path) else None
         try: smax = max(0.3, float(self.snd_max_v.get()))
         except Exception: smax = 6.0
         try: sboost = min(24.0, max(-30.0, float(self.snd_boost_v.get())))
         except Exception: sboost = -5.0
         def job():
-            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size) if path else (C.build_size_only(self.game, e, size) if size != 100 else ({}, [])); snd = None
+            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, mem) if path else (C.build_size_only(self.game, e, size) if size != 100 else ({}, [])); snd = None
             if spath or sgame:
                 from emoteqol.core import audio as A
                 ev = A.event_for_emote(self.game, e, C.emote_bins(self.game))
@@ -368,8 +370,52 @@ class App(tk.Tk):
         self.ptree.delete(*self.ptree.get_children())
         for key, e in self.pack.emotes.items():
             em = next((x for x in self.cat if x["key"] == key), None); img = self.icon_for(em, 40) if em else ""
+            cur = e["files"].get(em["inv"].lower()) if em else None
+            if cur:
+                try: img = self.photo(C.decode_tex(cur), 40, ("packicon", key, id(cur)))
+                except Exception: pass
             self.ptree.insert("", "end", iid=key, text="  " + e["name"], values=(e["source"], e["note"]), image=img)
         for key, a in self.pack.art.items(): self.ptree.insert("", "end", iid="art|" + key, text="  " + a["name"], values=(a.get("source", ""), a.get("note", "")), image=self.placeholder)
+    def view_selected(self, ev=None):
+        sel = [k for k in self.ptree.selection() if not k.startswith("art|")]
+        if not sel: return messagebox.showinfo("Pick an emote", "Select an emote in the pack list first.")
+        key = sel[0]; entry = self.pack.emotes.get(key); em = next((x for x in self.cat if x["key"] == key), None)
+        if not entry or not em: return
+        try: res = C.extract_frames(em, entry["files"], self.pack.other)
+        except Exception: return messagebox.showerror("Could not read it", traceback.format_exc()[-500:])
+        if not res: return messagebox.showinfo("No picture", "This pack only changes the sound or size of '%s', it holds no picture for it." % entry["name"])
+        frames, durs, fps = res; dlg = tk.Toplevel(self); dlg.title(entry["name"] + " - what is in the pack"); dlg.transient(self); dlg.resizable(False, False)
+        S = 280; bg = Image.new("RGBA", (S, S), (60, 60, 60, 255)); shots = []
+        for f in frames:
+            im = f.convert("RGBA"); im.thumbnail((S, S), Image.LANCZOS); t = bg.copy(); t.alpha_composite(im, ((S - im.width) // 2, (S - im.height) // 2)); shots.append(ImageTk.PhotoImage(t.convert("RGB")))
+        lab = ttk.Label(dlg, image=shots[0]); lab.pack(padx=14, pady=(14, 6)); state = {"i": 0, "job": None}
+        def tick():
+            state["i"] = (state["i"] + 1) % len(shots); lab.configure(image=shots[state["i"]]); state["job"] = dlg.after(int(max(30, durs[0] * 1000)), tick)
+        if len(shots) > 1: state["job"] = dlg.after(int(max(30, durs[0] * 1000)), tick)
+        total = sum(durs); ttk.Label(dlg, text="%d frame%s, %dx%d px%s" % (len(frames), "" if len(frames) == 1 else "s", frames[0].width, frames[0].height, (", %.1f s long" % total) if len(frames) > 1 else ""), foreground="#555").pack()
+        def close():
+            if state["job"]: dlg.after_cancel(state["job"])
+            dlg.destroy()
+        def edit_now(): close(); self.edit_from_pack(em, frames, durs)
+        def save_gif():
+            p = filedialog.asksaveasfilename(title="Save as GIF", defaultextension=".gif", initialfile=entry["name"] + ".gif", filetypes=[("GIF", "*.gif")])
+            if not p: return
+            fr = [f.convert("RGBA") for f in frames]; fr[0].save(p, save_all=True, append_images=fr[1:], duration=[int(d * 1000) for d in durs], loop=0, disposal=2, optimize=False)
+            messagebox.showinfo("Saved", "Saved:\n" + p)
+        row = ttk.Frame(dlg); row.pack(pady=12); ttk.Button(row, text="Edit this in the editor", command=edit_now).pack(side="left", padx=6); ttk.Button(row, text="Save as GIF...", command=save_gif).pack(side="left", padx=6); ttk.Button(row, text="Close", command=close).pack(side="left", padx=6)
+        dlg.protocol("WM_DELETE_WINDOW", close)
+    def edit_from_pack(self, em, frames, durs):
+        self.nb.select(0); self.sv.set("")
+        idx = next((i for i, x in enumerate(self.matches) if x["key"] == em["key"]), None)
+        if idx is not None: self.tree.selection_set(str(idx)); self.tree.see(str(idx))
+        self.cur = em; self.repl_frames = [f.convert("RGBA") for f in frames]; self.repl_durs = list(durs); self.mem_frames = (self.repl_frames, self.repl_durs)
+        self.edit_src = []
+        for f in self.repl_frames:
+            if max(f.size) <= 700: self.edit_src.append(f)
+            else: g = f.copy(); g.thumbnail((700, 700), Image.LANCZOS); self.edit_src.append(g)
+        self.repl_path = "(from the pack) " + em["name"]; self.fit_v.set("stretch"); self.loops_v.set(100.0); self.size_v.set(100); self._size_changed()
+        self.src_lbl.configure(text="%s   (%d frame%s, loaded from the pack - move, stretch or change it, then press Add)" % (em["name"], len(self.repl_frames), "" if len(self.repl_frames) == 1 else "s"))
+        self.reset_adj(); self.play(0); self.update_add(); self.busy("Loaded '%s' from the pack into the editor." % em["name"])
     def remove_selected(self):
         for k in self.ptree.selection():
             if k.startswith("art|"): self.pack.art.pop(k[4:], None)

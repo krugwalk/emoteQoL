@@ -16,7 +16,7 @@ Windows might warn about an unknown app because the exe isn't signed. Click "Mor
 - Make an emote bigger or smaller in game with the size slider
 - Change just the sound of an emote
 - Change the loading screen and HUD portrait of any champion and skin
-- Open a `.fantome` you already have and edit it, the rest of the file stays as it is
+- Open a `.fantome` you already have, look at the pictures and GIFs inside it, edit them and save, the rest of the file stays as it is
 
 Everything you add shows up in the list at the bottom. Press Save to make the `.fantome`.
 
