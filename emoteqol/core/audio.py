@@ -92,9 +92,84 @@ def detect_pack_sound(game, em, files, other):
                 oo = _volume_prop(ob, oobjs, sid); out["orig_level"] = struct.unpack_from("<f", ob, oo)[0] if oo else 0.0
     return out
 
-PREVIEW_LIFT_DB = 6.0
+PREVIEW_LISTENING_DB = 30.0
+LPF_MAX_HZ = 20000.0
+LPF_MIN_HZ = 100.0
+HPF_MIN_HZ = 20.0
+HPF_MAX_HZ = 3000.0
 
-def preview_wav(path, max_seconds, level_db, wem=None, wem_level=None):
+def league_audio_settings(final_dir):
+    import json
+    root = final_dir
+    for _ in range(3): root = os.path.dirname(root)
+    try: data = json.load(open(os.path.join(root, "Config", "PersistedSettings.json"), encoding="utf-8"))
+    except Exception: return None
+    vol = {}
+    for f in data.get("files", []):
+        for sec in f.get("sections", []):
+            if sec.get("name") == "Volume":
+                for st in sec.get("settings", []): vol[st.get("name")] = st.get("value")
+    def num(key, default):
+        try: return float(vol[key])
+        except Exception: return default
+    return dict(master=num("MasterVolume", 1.0), sfx=num("SfxVolume", 1.0), master_mute=num("MasterMute", 0) != 0, sfx_mute=num("SfxMute", 0) != 0)
+
+def _props_after(b, start):
+    for i in range(start, len(b) - 6):
+        n = b[i]
+        if 1 <= n <= 6 and i + 1 + n + 4 * n <= len(b):
+            ids = list(b[i + 1:i + 1 + n])
+            if ids == sorted(set(ids)) and max(ids) < 20:
+                vals = list(struct.unpack_from("<%df" % n, b, i + 1 + n))
+                if all(abs(v) < 500 and (v == 0 or abs(v) > 1e-3) for v in vals): return dict(zip(ids, vals))
+    return {}
+
+def _parent_id(bnk, objs, b):
+    for i in range(8, len(b) - 3):
+        c, = struct.unpack_from("<I", b, i)
+        if c in objs and objs[c][0] in (5, 6, 7, 9): return c
+    return None
+
+def mixer_chain(game, event_name):
+    ob = common_wad(game).read(SFX_BNK); secs, objs = bank.parse_bank(ob)
+    out = dict(own=0.0, gain=0.0, lpf=0.0, hpf=0.0)
+    for sid, mid in event_sounds(ob, event_name) or []:
+        t, q, ln = objs[sid]; b = bytes(ob[q + 5:q + ln]); o = _volume_prop(ob, objs, sid); v = struct.unpack_from("<f", ob, o)[0] if o else 0.0
+        if v <= -60: continue
+        out["own"] = v; props = _props_after(b, 31); out["lpf"] += props.get(3, 0.0); out["hpf"] += props.get(4, 0.0)
+        par = _parent_id(ob, objs, b); seen = set()
+        while par and par not in seen and len(seen) < 6:
+            seen.add(par); tp, qp, lp = objs[par]; bp = bytes(ob[qp + 5:qp + lp]); pp = _props_after(bp, 8)
+            out["gain"] += pp.get(6, 0.0) + pp.get(0, 0.0); out["lpf"] += pp.get(3, 0.0); out["hpf"] += pp.get(4, 0.0); par = _parent_id(ob, objs, bp)
+        return out
+    return out
+
+def ingame_profile(game, event_name, offset_db):
+    import numpy as np
+    ch = mixer_chain(game, event_name) if event_name else dict(own=0.0, gain=0.0, lpf=0.0, hpf=0.0)
+    st = league_audio_settings(game.dir)
+    own = ch["own"] + offset_db
+    if st is None: user_db = 0.0; user_txt = "League's sound settings could not be read, assuming 100%"; muted = False
+    else:
+        muted = st["master_mute"] or st["sfx_mute"]; amp = st["master"] * st["sfx"]
+        user_db = -120.0 if (muted or amp <= 0) else 20 * float(np.log10(amp))
+        user_txt = "your League volumes: master %d%% x sound effects %d%%%s" % (round(st["master"] * 100), round(st["sfx"] * 100), " (MUTED)" if muted else "")
+    total = own + ch["gain"] + user_db
+    text = "In League: the sound %+g dB, game mixers %+g dB, %s (%+.1f dB), filters low-pass %g / high-pass %g -> %+.1f dB in total" % (own, ch["gain"], user_txt, user_db, ch["lpf"], ch["hpf"], total)
+    return dict(own=own, chain_gain=ch["gain"], lpf=ch["lpf"], hpf=ch["hpf"], user_db=user_db, total_db=total, muted=muted, text=text)
+
+def lpf_hz(v): return LPF_MAX_HZ * (LPF_MIN_HZ / LPF_MAX_HZ) ** (max(0.0, min(100.0, v)) / 100.0)
+def hpf_hz(v): return HPF_MIN_HZ * (HPF_MAX_HZ / HPF_MIN_HZ) ** (max(0.0, min(100.0, v)) / 100.0)
+
+def apply_game_filters(x, lpf, hpf):
+    import numpy as np
+    if not (lpf or hpf) or len(x) == 0: return x
+    n = len(x); X = np.fft.rfft(x); f = np.fft.rfftfreq(n, 1.0 / RATE); H = np.ones_like(f)
+    if lpf > 0: H = H / np.sqrt(1.0 + (f / lpf_hz(lpf)) ** 4)
+    if hpf > 0: H = H / np.sqrt(1.0 + (hpf_hz(hpf) / np.maximum(f, 1e-6)) ** 4)
+    return np.fft.irfft(X * H, n)
+
+def preview_wav(path, max_seconds, profile, wem=None):
     import numpy as np
     out_path = tempfile.mktemp(suffix=".wav")
     if wem is not None:
@@ -102,19 +177,17 @@ def preview_wav(path, max_seconds, level_db, wem=None, wem_level=None):
         if not wem_to_wav(wem, src): return None
         w = wave.open(src); x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float64) / 32768.0; ch = w.getnchannels(); w.close(); os.remove(src)
         if ch > 1: x = x.reshape(-1, ch).mean(axis=1)
-        level = wem_level if wem_level is not None else 0.0
+    elif path.lower().endswith(".wem"):
+        tmp = tempfile.mktemp(suffix=".wav"); d = open(path, "rb").read()
+        if not wem_to_wav(d, tmp): return None
+        w = wave.open(tmp); x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float64) / 32768.0; ch = w.getnchannels(); w.close(); os.remove(tmp)
+        if ch > 1: x = x.reshape(-1, ch).mean(axis=1)
+        x = x[:int(max_seconds * RATE)]
     else:
-        if path.lower().endswith(".wem"):
-            d = open(path, "rb").read(); tmp = tempfile.mktemp(suffix=".wav")
-            if not wem_to_wav(d, tmp): return None
-            w = wave.open(tmp); x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float64) / 32768.0; ch = w.getnchannels(); w.close(); os.remove(tmp)
-            if ch > 1: x = x.reshape(-1, ch).mean(axis=1)
-            x = x[:int(max_seconds * RATE)]
-        else:
-            pcm = load_pcm(path)[:int(max_seconds * RATE)]; tmp = tempfile.mktemp(suffix=".wav"); _write_wav(tmp, pcm, -4.0, DYN_RATIOS["Evened out"])
-            w = wave.open(tmp); x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float64) / 32768.0; w.close(); os.remove(tmp)
-        level = level_db
-    y = np.clip(x * 10 ** ((level + PREVIEW_LIFT_DB) / 20.0), -1.0, 1.0)
+        pcm = load_pcm(path)[:int(max_seconds * RATE)]; tmp = tempfile.mktemp(suffix=".wav"); _write_wav(tmp, pcm, -4.0, DYN_RATIOS["Evened out"])
+        w = wave.open(tmp); x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float64) / 32768.0; w.close(); os.remove(tmp)
+    x = apply_game_filters(x, profile["lpf"], profile["hpf"])
+    y = np.clip(x * 10 ** ((profile["total_db"] + PREVIEW_LISTENING_DB) / 20.0), -1.0, 1.0)
     w = wave.open(out_path, "wb"); w.setnchannels(1); w.setsampwidth(2); w.setframerate(RATE); w.writeframes((y * 32000).astype(np.int16).tobytes()); w.close()
     return out_path
 

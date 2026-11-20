@@ -69,6 +69,8 @@ class App(tk.Tk):
         ttk.Label(r3, text="Volume (dB, 0 = the game's own):").pack(side='left'); self.snd_boost_v = tk.DoubleVar(value=0.0); ttk.Spinbox(r3, from_=-30, to=30, increment=1, textvariable=self.snd_boost_v, width=5).pack(side='left', padx=4); ttk.Button(r3, text='Play preview', command=self.play_preview).pack(side='left', padx=(10, 2)); ttk.Button(r3, text='Stop', command=self.stop_preview).pack(side='left'); ttk.Button(r3, text='Find LtMAO...', command=self.find_ltmao).pack(side='left', padx=10)
         self.ltmao_lbl = ttk.Label(r3, text='', foreground='#666'); self.ltmao_lbl.pack(side='left')
         ttk.Label(sb_, text='Your own mp3/wav/ogg/mp4 is converted with the Wwise that comes with LtMAO. Shorten it with the Sound length slider.', foreground='#666', wraplength=520).grid(row=2, column=0, columnspan=4, sticky='w', padx=6, pady=(0, 4))
+        self.profile_lbl = ttk.Label(sb_, text="", foreground="#444", wraplength=520, justify="left"); self.profile_lbl.grid(row=3, column=0, columnspan=4, sticky="w", padx=6, pady=(0, 4)); self.profile_job = None
+        self.snd_boost_v.trace_add("write", lambda *a: self.after_idle(self.refresh_profile))
         self.after(600, self._ltmao_status)
         self.add_btn = ttk.Button(right, text="Add replacement to pack  >>", command=self.add_to_pack, state="disabled"); self.add_btn.pack(anchor="w", pady=6)
         self.log = tk.Text(right, height=1, wrap="word", state="disabled"); self.log.pack(fill="x")
@@ -180,6 +182,7 @@ class App(tk.Tk):
         self.cur = self.matches[int(s[0])]; self.cur_name.configure(text=self.cur["name"] + "   (" + self.cur["group"] + ")")
         self.cur_img.configure(image=self.big_icon(self.cur)); self.update_add()
         if not getattr(self, "loading_pack", False): self.reset_for_emote(self.cur)
+        self.refresh_profile()
     def reset_for_emote(self, em):
         self.clear_sound(); self.snd_boost_v.set(0.0); self.size_v.set(100); self._size_changed(); self.anim_v.set(True); self.loops_v.set(100.0)
         if self.mem_frames is not None:
@@ -360,6 +363,17 @@ class App(tk.Tk):
         if not p: return
         if A.set_ltmao(p): self.ltmao_lbl.configure(text="LtMAO found - your own sounds will work")
         else: messagebox.showerror("Not LtMAO", "That folder doesn't contain LtMAO's Wwise converter (res/wiwawe/...). Pick the LtMAO folder that has start.bat in it.")
+    def refresh_profile(self):
+        if not self.cur or not self.game: return
+        em = self.cur; game = self.game
+        try: off = float(self.snd_boost_v.get())
+        except Exception: off = 0.0
+        def work():
+            from emoteqol.core import audio as A
+            ev = A.event_for_emote(game, em, C.emote_bins(game)); return A.ingame_profile(game, ev, off)["text"] if ev else "This emote's sound could not be found in the game's sound files."
+        def done(r, err):
+            if self.cur is em: self.profile_lbl.configure(text=r if r else "")
+        self.run_bg(work, done)
     def stop_preview(self):
         try:
             import winsound; winsound.PlaySound(None, winsound.SND_PURGE)
@@ -373,16 +387,15 @@ class App(tk.Tk):
         self.busy("Preparing the preview...")
         def work():
             from emoteqol.core import audio as A
-            ev = A.event_for_emote(game, em, C.emote_bins(game)); stock = A.stock_level(game, ev) if ev else 0.0
-            if spath: return A.preview_wav(spath, smax, stock + off), "your sound at %+g dB from the game's own level%s" % (off, "" if not ev else ", cut to %.1f s" % smax)
-            if sgame:
-                wem, lv = A.first_audible_wem(game, sgame["event"]); return (A.preview_wav(None, 0, 0, wem, lv) if wem else None), "the sound of %s, as the game plays it" % sgame["name"]
-            if keep and keep.get("wem"): return A.preview_wav(None, 0, 0, keep["wem"], stock + off), "the sound in the pack"
+            ev = A.event_for_emote(game, em, C.emote_bins(game))
+            if spath: prof = A.ingame_profile(game, ev, off); return A.preview_wav(spath, smax, prof), prof["text"]
+            if sgame: prof = A.ingame_profile(game, sgame["event"], 0.0); wem, lv = A.first_audible_wem(game, sgame["event"]); return (A.preview_wav(None, 0, prof, wem) if wem else None), prof["text"]
+            if keep and keep.get("wem"): prof = A.ingame_profile(game, ev, off); return A.preview_wav(None, 0, prof, keep["wem"]), prof["text"]
             return None, ""
         def done(r, err):
             self.busy("")
             if err or not r or not r[0]: return messagebox.showinfo("Cannot preview", "The preview needs LtMAO's decoder to read game sounds, and a readable sound file." if not err else err[-300:])
-            import winsound; winsound.PlaySound(r[0], winsound.SND_FILENAME | winsound.SND_ASYNC); self.busy("Playing: " + r[1])
+            import winsound; winsound.PlaySound(r[0], winsound.SND_FILENAME | winsound.SND_ASYNC); self.busy("Playing. Scaled up 30 dB so it is audible on speakers; its loudness compared with other game sounds is exact.")
         self.run_bg(work, done)
     def clear_sound(self):
         self.sound_path = None; self.sound_game = None; self.sound_keep = None; self.vid_sound_v.set(False); self.sound_lbl.configure(text="none - the emote keeps its normal sound"); self.snd_len.state(["disabled"]); self.snd_len_lbl.configure(text="(pick a sound first)"); self.update_add()
@@ -506,7 +519,7 @@ class App(tk.Tk):
         if speed != 100.0: self.repl_durs = [x * speed / 100.0 for x in durs]; self.mem_frames = (self.repl_frames, self.repl_durs)
         self.restore_sound_and_size(em)
         self.src_lbl.configure(text="%s   (%d frame%s, loaded from the pack - move, stretch or change it, then press Add)" % (em["name"], len(self.repl_frames), "" if len(self.repl_frames) == 1 else "s"))
-        self.reset_adj(); self.play(0); self.update_add(); self.busy("Loaded '%s' from the pack into the editor." % em["name"])
+        self.reset_adj(); self.play(0); self.update_add(); self.refresh_profile(); self.busy("Loaded '%s' from the pack into the editor." % em["name"])
     def remove_selected(self):
         for k in self.ptree.selection():
             if k.startswith("art|"): self.pack.art.pop(k[4:], None)
