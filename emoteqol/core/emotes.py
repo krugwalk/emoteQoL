@@ -466,7 +466,7 @@ class Pack:
         self.silence_pop = True
         self.art = {}
         self.other = {}
-    def add(self, em, files, source, notes=""): self.emotes[em["key"]] = dict(name=em["name"], inv=em["inv"], files=files, source=source, note=notes)
+    def add(self, em, files, source, notes="", settings=None): self.emotes[em["key"]] = dict(name=em["name"], inv=em["inv"], files=files, source=source, note=notes, settings=settings)
     def remove(self, key): self.emotes.pop(key, None); self.sounds.pop(key, None); self.art.pop(key, None)
 
 def _same_game_file(zip_name, target):
@@ -514,7 +514,7 @@ def import_fantome(path, catalogue):
         elif n == "META/info.json" or n == "META/emotemaker.json": continue
         else: p.other[n] = z.read(n)
     for base, files in groups.items():
-        e = by_base[base]; p.emotes[e["key"]] = dict(name=e["name"], inv=e["inv"], files=files, source=meta.get(e["key"], {}).get("source", "(from imported file)"), note=meta.get(e["key"], {}).get("note", ""))
+        e = by_base[base]; p.emotes[e["key"]] = dict(name=e["name"], inv=e["inv"], files=files, source=meta.get(e["key"], {}).get("source", "(from imported file)"), note=meta.get(e["key"], {}).get("note", ""), settings=meta.get(e["key"], {}).get("settings"))
     for key, m in art_meta.items():
         names = [n for n in m.get("files", []) if n in p.other]
         if names: p.art[key] = dict(name=m.get("name", key), files={n: p.other.pop(n) for n in names}, source=m.get("source", ""), note=m.get("note", ""))
@@ -546,6 +546,7 @@ def export_fantome(pack, path, image_bytes=None, game=None):
         for key, e in pack.emotes.items():
             for wp, d in e["files"].items(): z.writestr(GLOBAL_DIR + wp, d)
             meta[key] = dict(source=e["source"], note=e["note"])
+            if e.get("settings"): meta[key]["settings"] = e["settings"]
             if key in pack.sounds: meta[key]["sound"] = dict(source=pack.sounds[key]["source"], event=pack.sounds[key]["event"])
         meta["_options"] = dict(silence_pop=pop); meta["_art"] = {k: dict(name=a["name"], files=list(a["files"]), source=a.get("source", ""), note=a.get("note", "")) for k, a in pack.art.items()}
         z.writestr("META/info.json", json.dumps(pack.info, indent=2)); z.writestr("META/emotemaker.json", json.dumps(meta, indent=2))

@@ -326,7 +326,7 @@ class App(tk.Tk):
         def done(r, err):
             self.update_add()
             if err: self.busy("Failed."); self.say("ERROR: " + err); return messagebox.showerror("Error", err[-600:])
-            files, notes, snd = r; self.pack.add(e, files, os.path.basename(path) if path else ("(size only)" if not spath and not sgame else "(sound only)"), "; ".join(notes))
+            files, notes, snd = r; self.pack.add(e, files, os.path.basename(path) if path else ("(size only)" if not spath and not sgame else "(sound only)"), "; ".join(notes), dict(animate=bool(animated), speed=float(loops), fit=fit, size=int(size)))
             if snd: self.pack.sounds[e["key"]] = snd
             else: self.pack.sounds.pop(e["key"], None)
             self.say("%s: %s" % (e["name"], "; ".join(notes) or ("icons and popup replaced" if path else "nothing changed"))); self.refresh_pack(); self.busy("Added '%s' to the pack." % e["name"])
@@ -436,16 +436,26 @@ class App(tk.Tk):
         for f in self.repl_frames:
             if max(f.size) <= 700: self.edit_src.append(f)
             else: g = f.copy(); g.thumbnail((700, 700), Image.LANCZOS); self.edit_src.append(g)
-        self.repl_path = "(from the pack) " + em["name"]; self.fit_v.set("stretch"); self.loops_v.set(100.0)
+        self.repl_path = "(from the pack) " + em["name"]; self.fit_v.set("stretch")
+        st = self.pack.emotes[em["key"]].get("settings") or {}; speed = float(st.get("speed", 100.0)) or 100.0
+        self.loops_v.set(speed); self.anim_v.set(bool(st.get("animate", len(frames) > 1)))
+        if speed != 100.0: self.repl_durs = [x * speed / 100.0 for x in durs]; self.mem_frames = (self.repl_frames, self.repl_durs)
         try: size, layers, flat = C.popup_settings(self.game, em, self.pack.emotes[em["key"]]["files"], self.pack.other)
         except Exception: size, layers, flat = 100, 0, False
         self.sound_keep = None
         try: snd = A.detect_pack_sound(self.game, em, self.pack.emotes[em["key"]]["files"], self.pack.other)
         except Exception: snd = None
         if snd and snd["found"] and (snd["custom"] or snd["retargeted"]) and not (self.sound_path or self.sound_game):
-            self.sound_keep = snd
             if snd["level"] is not None: self.snd_boost_v.set(round(snd["level"] - (snd["orig_level"] if snd["orig_level"] is not None else 0.0), 1))
-            self.sound_lbl.configure(text="keeping the sound already in the pack%s (pick another to replace it)" % ((", %.1f s" % snd["seconds"]) if snd["seconds"] else ""))
+            restored = False
+            if snd["custom"] and snd["wem"]:
+                import tempfile
+                wav = tempfile.mktemp(suffix=".wav")
+                if A.wem_to_wav(snd["wem"], wav):
+                    self.vid_sound_v.set(False); self.set_sound_file(wav); self.sound_lbl.configure(text="the sound from the pack%s - change its length or volume, or pick another" % ((", %.1f s" % snd["seconds"]) if snd["seconds"] else "")); restored = True
+            if not restored:
+                self.sound_keep = snd
+                self.sound_lbl.configure(text="keeping the sound already in the pack%s (pick another to replace it)" % ((", %.1f s" % snd["seconds"]) if snd["seconds"] else ""))
         self.size_v.set(size); self._size_changed()
         self.src_lbl.configure(text="%s   (%d frame%s, loaded from the pack - move, stretch or change it, then press Add)" % (em["name"], len(self.repl_frames), "" if len(self.repl_frames) == 1 else "s"))
         self.reset_adj(); self.play(0); self.update_add(); self.busy("Loaded '%s' from the pack into the editor." % em["name"])
