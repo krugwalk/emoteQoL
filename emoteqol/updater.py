@@ -7,7 +7,7 @@ import tempfile
 import threading
 import urllib.request
 
-VERSION = "1.13.1"
+VERSION = "1.13.2"
 REPO = "krugwalk/emoteQoL"
 ASSET_NAME = "EmoteQoL.exe"
 
@@ -74,6 +74,8 @@ def apply_and_restart(new_exe, target_exe):
     bat = os.path.join(tempfile.gettempdir(), "emoteqol_apply_update.bat")
     lines = [
         "@echo off",
+        "set PYINSTALLER_RESET_ENVIRONMENT=1",
+        "set _MEIPASS2=",
         "set n=0",
         ":wait",
         "set /a n+=1",
@@ -87,4 +89,6 @@ def apply_and_restart(new_exe, target_exe):
     ]
     with open(bat, "w") as f:
         f.write("\r\n".join(lines) + "\r\n")
-    subprocess.Popen(["cmd", "/c", bat], creationflags=0x08000008, close_fds=True)
+    env = {k: v for k, v in os.environ.items() if not k.startswith("_PYI") and k != "_MEIPASS2"}
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    subprocess.Popen(["cmd", "/c", bat], creationflags=0x08000008, close_fds=True, env=env)
