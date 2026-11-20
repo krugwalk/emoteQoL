@@ -7,7 +7,7 @@ import tempfile
 import threading
 import urllib.request
 
-VERSION = "1.13.2"
+VERSION = "1.13.3"
 REPO = "krugwalk/emoteQoL"
 ASSET_NAME = "EmoteQoL.exe"
 
