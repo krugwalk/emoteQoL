@@ -1,5 +1,6 @@
 import io, os, re, struct, wave, array, shutil, subprocess, tempfile, sys
 from emoteqol.formats import wad as wadtool; from emoteqol.formats import binparse as BP; from emoteqol.formats import bank; from emoteqol.formats import wpk
+from compression import zstd
 
 SFX_WPK = "assets/sounds/wwise2016/sfx/shared/misc_emotes_sfx_audio.wpk"; SFX_BNK = "assets/sounds/wwise2016/sfx/shared/misc_emotes_sfx_events.bnk"
 COMMON = ("Maps", "Shipping", "Common.wad.client")
@@ -12,6 +13,60 @@ def fnv32(s):
     return h
 
 def common_wad(game): return wadtool.Wad(os.path.join(game.dir, *COMMON))
+
+MAIN_PAIR = (BNK_HASH, PK_HASH)
+_PAIRS = {}
+
+def _head4(w, off, csz, typ):
+    t = typ & 0xF
+    w.f.seek(off)
+    if t == 0: return w.f.read(4)
+    if t in (3, 4):
+        try: return zstd.ZstdDecompressor().decompress(w.f.read(csz), 4)[:4]
+        except Exception: return b""
+    return b""
+
+def bank_pairs(game):
+    key = game.dir
+    if key in _PAIRS: return _PAIRS[key]
+    w = common_wad(game); banks = {}; pkgs = {}
+    for ph, (off, csz, usz, typ) in w.entries.items():
+        if usz < 64 or usz > 60_000_000: continue
+        head = _head4(w, off, csz, typ)
+        if head not in (b"BKHD", b"r3d2"): continue
+        try: d = w.read(ph)
+        except Exception: continue
+        if isinstance(d, tuple): continue
+        try:
+            if head == b"BKHD":
+                secs, objs = bank.parse_bank(d)
+                banks[ph] = (set(i for i, (t, q, l) in objs.items() if t == 4), set(struct.unpack_from("<I", d, q + 5 + 9)[0] for i, (t, q, l) in objs.items() if t == 2))
+            else:
+                pkgs[ph] = set(int(e[0].split(".")[0]) for e in wpk.parse_wpk(d) if e and e[0].split(".")[0].isdigit())
+        except Exception: continue
+    out = []
+    for bh, (events, media) in banks.items():
+        if bh == BNK_HASH: out.insert(0, (BNK_HASH, PK_HASH, events)); continue
+        best = None
+        for wh, names in pkgs.items():
+            cover = len(media & names) / len(media) if media else 0.0
+            if cover > 0 and (best is None or (cover, -len(names)) > (best[0], -best[2])): best = (cover, wh, len(names))
+        if best and best[0] >= 0.99: out.append((bh, best[1], events))
+    if not out or out[0][0] != BNK_HASH: out.insert(0, (BNK_HASH, PK_HASH, set(banks.get(BNK_HASH, (set(), set()))[0])))
+    _PAIRS[key] = out
+    return out
+
+def bank_pair_for_event(game, event_name):
+    eid = fnv32(event_name)
+    for bh, wh, events in bank_pairs(game):
+        if eid in events: return (bh, wh)
+    return None
+
+def pair_names(pair): return "WAD/Common.wad.client/%016x.bnk" % pair[0], "WAD/Common.wad.client/%016x.wpk" % pair[1]
+
+def _bank_of(game, event_name):
+    pair = bank_pair_for_event(game, event_name) or MAIN_PAIR
+    return pair, common_wad(game).read(pair[0])
 
 def event_for_emote(game, em, emote_bin_list):
     target = em["vfx"].lower().encode()
@@ -29,7 +84,7 @@ def event_for_emote(game, em, emote_bin_list):
     return None
 
 def stock_level(game, event_name):
-    ob = common_wad(game).read(SFX_BNK); secs, objs = bank.parse_bank(ob)
+    pair, ob = _bank_of(game, event_name); secs, objs = bank.parse_bank(ob)
     for sid, mid in event_sounds(ob, event_name) or []:
         o = _volume_prop(ob, objs, sid)
         if o is None: return 0.0
@@ -68,13 +123,14 @@ def detect_pack_sound(game, em, files, other):
             ev = event_from_bin(data, target)
             if ev: break
     if not ev: ev = event_for_emote(game, em, C.emote_bins(game))
-    cw = common_wad(game); ob = cw.read(SFX_BNK); ow = cw.read(SFX_WPK)
-    pw = other.get("WAD/Common.wad.client/%016x.wpk" % PK_HASH); pb = other.get("WAD/Common.wad.client/%016x.bnk" % BNK_HASH); bk = pb or ob
-    out = dict(event=ev, found=False, custom=False, retargeted=False, level=None, orig_level=None, seconds=None, wem=None, pop_silenced=False)
+    cw = common_wad(game); out = dict(event=ev, found=False, custom=False, retargeted=False, level=None, orig_level=None, seconds=None, wem=None, pop_silenced=False)
+    mb_name, mw_name = pair_names(MAIN_PAIR); mw = other.get(mw_name); mb = other.get(mb_name) or cw.read(BNK_HASH)
+    if mw:
+        me = {e[0]: e for e in wpk.parse_wpk(mw) if e}; pops = event_sounds(mb, POP_EVENT) or []
+        if pops and all(("%d.wem" % mid) in me and mw[me["%d.wem" % mid][1]:me["%d.wem" % mid][1] + me["%d.wem" % mid][2]] == SILENT_WEM for sid, mid in pops): out["pop_silenced"] = True
+    pair = (bank_pair_for_event(game, ev) if ev else None) or MAIN_PAIR; out["pair"] = pair; pb_name, pw_name = pair_names(pair)
+    ob = cw.read(pair[0]); ow = cw.read(pair[1]); pw = other.get(pw_name); pb = other.get(pb_name); bk = pb or ob
     pe = {e[0]: e for e in wpk.parse_wpk(pw) if e} if pw else {}; oe = {e[0]: e for e in wpk.parse_wpk(ow) if e}
-    if pw:
-        pops = event_sounds(bk, POP_EVENT) or []
-        if pops and all(("%d.wem" % mid) in pe and pw[pe["%d.wem" % mid][1]:pe["%d.wem" % mid][1] + pe["%d.wem" % mid][2]] == SILENT_WEM for sid, mid in pops): out["pop_silenced"] = True
     snd = event_sounds(bk, ev) if ev else None
     if not snd: return out
     out["found"] = True; osnd = event_sounds(ob, ev); out["retargeted"] = snd != osnd
@@ -130,7 +186,7 @@ def _parent_id(bnk, objs, b):
     return None
 
 def mixer_chain(game, event_name):
-    ob = common_wad(game).read(SFX_BNK); secs, objs = bank.parse_bank(ob)
+    pair, ob = _bank_of(game, event_name); secs, objs = bank.parse_bank(ob)
     out = dict(own=0.0, gain=0.0, lpf=0.0, hpf=0.0)
     for sid, mid in event_sounds(ob, event_name) or []:
         t, q, ln = objs[sid]; b = bytes(ob[q + 5:q + ln]); o = _volume_prop(ob, objs, sid); v = struct.unpack_from("<f", ob, o)[0] if o else 0.0
@@ -191,7 +247,7 @@ def preview_wav(path, max_seconds, profile, wem=None, start=0.0):
     return out_path
 
 def first_audible_wem(game, event_name):
-    cw = common_wad(game); ob = cw.read(SFX_BNK); ow = cw.read(SFX_WPK); secs, objs = bank.parse_bank(ob); entries = {e[0]: e for e in wpk.parse_wpk(ow) if e}
+    cw = common_wad(game); pair, ob = _bank_of(game, event_name); ow = cw.read(pair[1]); secs, objs = bank.parse_bank(ob); entries = {e[0]: e for e in wpk.parse_wpk(ow) if e}
     for sid, mid in event_sounds(ob, event_name) or []:
         o = _volume_prop(ob, objs, sid); v = struct.unpack_from("<f", ob, o)[0] if o else 0.0
         e = entries.get("%d.wem" % mid)
@@ -419,8 +475,8 @@ def raise_event_volume(bnk, ev, level_db):
         if v > -60: struct.pack_into("<f", bnk, o, float(level_db)); done.append((v, float(level_db)))
     return done
 
-def apply_sounds(game, sounds, base_wpk=None, base_bnk=None, retargets=None, gain_db=None, silence=None):
-    cw = common_wad(game); bnk = bytearray(base_bnk or cw.read(SFX_BNK)); wp = base_wpk or cw.read(SFX_WPK); notes = []; repl = {}
+def apply_sounds(game, sounds, base_wpk=None, base_bnk=None, retargets=None, gain_db=None, silence=None, pair=None):
+    pair = pair or MAIN_PAIR; cw = common_wad(game); bnk = bytearray(base_bnk or cw.read(pair[0])); wp = base_wpk or cw.read(pair[1]); notes = []; repl = {}
     for ev, (wem, is_pcm) in sounds.items():
         snd = event_sounds(bytes(bnk), ev)
         if not snd: notes.append("event %s not found in the emote sound bank" % ev); continue

@@ -542,11 +542,15 @@ def export_fantome(pack, path, image_bytes=None, game=None):
     if pack.sounds or pop:
         from emoteqol.core import audio as A
         if game is None: raise RuntimeError("the game is needed to build custom sounds")
-        names = {"wpk": "WAD/Common.wad.client/%016x.wpk" % A.PK_HASH, "bnk": "WAD/Common.wad.client/%016x.bnk" % A.BNK_HASH}
-        bw, bb = pack.other.get(names["wpk"]), pack.other.get(names["bnk"])
-        wpk_b, bnk_b, notes = A.apply_sounds(game, {s["event"]: (s["wem"], s["pcm"]) for s in pack.sounds.values() if s.get("wem")}, bw, bb, {s["event"]: s["retarget"] for s in pack.sounds.values() if s.get("retarget")}, {s["event"]: s.get("level") for s in pack.sounds.values() if (s.get("wem") or s.get("keep")) and s.get("level") is not None}, [A.POP_EVENT] if pop else None)
-        if bw is not None or pop or any(s.get("wem") for s in pack.sounds.values()): extra[names["wpk"]] = wpk_b
-        if bb is not None or bnk_b != A.common_wad(game).read(A.SFX_BNK): extra[names["bnk"]] = bnk_b
+        groups = {}
+        for s in pack.sounds.values(): groups.setdefault(A.bank_pair_for_event(game, s["event"]) or A.MAIN_PAIR, []).append(s)
+        if pop: groups.setdefault(A.MAIN_PAIR, [])
+        for pair, items in groups.items():
+            bnk_name, wpk_name = A.pair_names(pair); is_main = pair == A.MAIN_PAIR; use_pop = pop and is_main
+            bw, bb = pack.other.get(wpk_name), pack.other.get(bnk_name)
+            wpk_b, bnk_b, notes = A.apply_sounds(game, {s["event"]: (s["wem"], s["pcm"]) for s in items if s.get("wem")}, bw, bb, {s["event"]: s["retarget"] for s in items if s.get("retarget")}, {s["event"]: s.get("level") for s in items if (s.get("wem") or s.get("keep")) and s.get("level") is not None}, [A.POP_EVENT] if use_pop else None, pair)
+            if bw is not None or use_pop or any(s.get("wem") for s in items): extra[wpk_name] = wpk_b
+            if bb is not None or bnk_b != A.common_wad(game).read(pair[0]): extra[bnk_name] = bnk_b
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
         taken = {GLOBAL_DIR + wp for e in pack.emotes.values() for wp in e["files"]} | set(extra)
         art_files = {n: d for a in pack.art.values() for n, d in a["files"].items()}

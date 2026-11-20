@@ -391,14 +391,25 @@ class App(tk.Tk):
         try: sboost = min(30.0, max(-30.0, float(self.snd_boost_v.get())))
         except Exception: sboost = 0.0
         def job():
-            from emoteqol.core import audio as A
+            import tempfile; from emoteqol.core import audio as A
             pre = mem or (C.load_video_range(path, t0, min(t1, t0 + max(4.0, popup_T * loops / 100.0 + 1.0))) if (path and C.is_video(path)) else piece)
             files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, pre, flat) if path else (C.build_size_only(self.game, e, size, flat) if size != 100 else ({}, [])); snd = None
             if spath or sgame:
                 from emoteqol.core import audio as A
                 ev = A.event_for_emote(self.game, e, C.emote_bins(self.game))
                 if not ev: notes.append("sound: this emote's sound event wasn't found, so its sound is unchanged")
-                elif not A.event_sounds(A.common_wad(self.game).read(A.SFX_BNK), ev): notes.append("sound: event %s isn't in the emote sound bank (it may use another bank), so its sound is unchanged" % ev)
+                elif not A.bank_pair_for_event(self.game, ev): notes.append("sound: event %s wasn't found in any of the game's sound banks, so its sound is unchanged" % ev)
+                elif sgame and A.bank_pair_for_event(self.game, ev) != A.bank_pair_for_event(self.game, sgame["event"]):
+                    swem, slv = A.first_audible_wem(self.game, sgame["event"])
+                    if not swem: notes.append("sound: the sound of '%s' could not be read, so the sound is unchanged" % sgame["name"])
+                    else:
+                        wav = tempfile.mktemp(suffix=".wav"); note = "plays the in-game sound of %s" % sgame["name"]
+                        if A.wem_to_wav(swem, wav):
+                            try: swem, pcm, note = A.make_wem(wav, smax, -4.0, "Evened out", 0.0)[0], False, "plays the in-game sound of %s (evened to the loudness of custom sounds)" % sgame["name"]
+                            except Exception: pass
+                            try: os.remove(wav)
+                            except Exception: pass
+                        snd = dict(event=ev, wem=swem, pcm=False, level=A.stock_level(self.game, ev) + sboost, source="sound of '%s'" % sgame["name"], note=note); notes.append("sound: plays the in-game sound of '%s'" % sgame["name"])
                 elif sgame:
                     snd = dict(event=ev, wem=None, pcm=False, retarget=sgame["event"], source="sound of '%s'" % sgame["name"], note="plays the in-game sound of %s" % sgame["name"]); notes.append("sound: plays the in-game sound of '%s'" % sgame["name"])
                 else:
@@ -413,6 +424,8 @@ class App(tk.Tk):
             files, notes, snd = r; self.pack.add(e, files, os.path.basename(path) if path else ("(size only)" if not spath and not sgame else "(sound only)"), "; ".join(notes), dict(animate=bool(animated), speed=float(loops), fit=fit, size=int(size)))
             if snd: self.pack.sounds[e["key"]] = snd
             else: self.pack.sounds.pop(e["key"], None)
+            lost = [n for n in notes if n.startswith("sound:") and "unchanged" in n]
+            if (spath or sgame) and not snd and lost: messagebox.showwarning("The sound was not added", chr(10).join(lost))
             self.say("%s: %s" % (e["name"], "; ".join(notes) or ("icons and popup replaced" if path else "nothing changed"))); self.refresh_pack(); self.busy("Added '%s' to the pack." % e["name"])
         self.run_bg(job, done)
     def pick_sound(self):
