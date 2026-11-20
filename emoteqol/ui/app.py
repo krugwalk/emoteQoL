@@ -203,9 +203,9 @@ class App(tk.Tk):
         return self.photo_refs[k]
 
     def pick_image(self):
-        self.mem_frames = None
         p = filedialog.askopenfilename(title="Choose a GIF, image or video", filetypes=[("GIF / images / video", "*.gif *.png *.jpg *.jpeg *.webp *.bmp *.mp4 *.webm *.mov *.mkv *.avi *.m4v"), ("All files", "*.*")])
         if not p: return
+        self.mem_frames = None
         try: self.repl_frames, self.repl_durs = C.load_frames(p)
         except Exception as e: return messagebox.showerror("Could not open", str(e))
         self.edit_src = []
@@ -359,7 +359,7 @@ class App(tk.Tk):
         self.busy("Building the replacement for '%s'..." % e["name"]); self.add_btn.configure(state="disabled")
         t0, t1 = self.trim_t; popup_T = self.popup_T; lo, hi = self.trim_idx; cut = bool(path and len(self.repl_frames) > 1 and (hi - lo + 1) < len(self.repl_frames)); piece = (self.repl_frames[lo:hi + 1], self.repl_durs[lo:hi + 1]) if cut else None
         vstart = t0 if (self.sound_path and self.sound_path == path and C.is_video(path)) else 0.0
-        spath = self.sound_path; sgame = self.sound_game; keep = self.sound_keep if not (self.sound_path or self.sound_game) else None; mem = (piece or self.mem_frames) if (self.mem_frames and path == self.repl_path) else None
+        spath = self.sound_path; sgame = self.sound_game; keep = self.sound_keep if not (self.sound_path or self.sound_game) else None; mem = (piece or (self.repl_frames, self.repl_durs)) if (path and not os.path.exists(path) and self.repl_frames) else None
         try: smax = max(0.3, float(self.snd_max_v.get()))
         except Exception: smax = 6.0
         try: sboost = min(30.0, max(-30.0, float(self.snd_boost_v.get())))
