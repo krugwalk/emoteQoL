@@ -60,20 +60,9 @@ def do_install(final_dir, shortcut=True, dest=None):
     except Exception: pass
     if final_dir: s["game"] = final_dir
     s["install_dir"] = d
-    if os.path.normcase(exe_path()) != os.path.normcase(dst): s["source_exe"] = exe_path()
     os.makedirs(C.APPDATA, exist_ok=True); json.dump(s, open(os.path.join(C.APPDATA, "settings.json"), "w"))
     if shortcut: make_shortcut(os.path.join(desktop_dir(), APP + ".lnk"), dst, ico, d)
     return dst
-
-def maybe_update():
-    try:
-        s = json.load(open(os.path.join(C.APPDATA, "settings.json"))); src = s.get("source_exe"); dst = exe_path()
-        if not src or not os.path.exists(src) or os.path.normcase(os.path.abspath(src)) == os.path.normcase(dst): return False
-        if os.path.getmtime(src) <= os.path.getmtime(dst) + 2: return False
-        bat = os.path.join(os.environ.get("TEMP", "."), "emoteqol_update.bat")
-        open(bat, "w").write('@echo off\nping -n 3 127.0.0.1 >nul\ncopy /y "%s" "%s" >nul\nstart "" "%s"\n' % (src, dst, dst))
-        subprocess.Popen(["cmd", "/c", bat], creationflags=0x08000008, close_fds=True); return True
-    except Exception: return False
 
 def run_installer():
     root = tk.Tk(); root.title("Install " + APP); root.geometry("560x372"); root.resizable(False, False)

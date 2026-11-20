@@ -10,6 +10,8 @@ Get `EmoteQoL.exe` from the [latest release](https://github.com/krugwalk/emoteQo
 
 Windows might warn about an unknown app because the exe isn't signed. Click "More info", then "Run anyway".
 
+When a new version comes out, a bar at the top of the app tells you. Click Update now and it downloads the new version, installs it and restarts by itself.
+
 ## What it does
 
 - Swap any emote for a picture, a GIF or a video. A trim bar under the editor lets you drag the edges to choose which part of a GIF or video is used

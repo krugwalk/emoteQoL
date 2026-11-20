@@ -8,6 +8,7 @@ from emoteqol.ui import size_preview
 from emoteqol.ui import trimbar
 import bisect
 from emoteqol import updater
+from emoteqol import installer
 
 SETTINGS = os.path.join(C.APPDATA, "settings.json")
 def load_settings():
@@ -25,7 +26,7 @@ class App(tk.Tk):
     def _ui(self):
         st = ttk.Style(self); st.configure("Treeview", rowheight=44)
         self.update_bar = tk.Frame(self, bg="#fff4cc"); self.update_lbl = tk.Label(self.update_bar, bg="#fff4cc", fg="#4a3b00", anchor="w", padx=10, pady=5); self.update_lbl.pack(side="left", fill="x", expand=True)
-        tk.Button(self.update_bar, text="Dismiss", command=self.dismiss_update, relief="flat", bg="#fff4cc").pack(side="right", padx=6); self.update_btn = tk.Button(self.update_bar, text="Download", relief="groove"); self.update_btn.pack(side="right", padx=4)
+        tk.Button(self.update_bar, text="Dismiss", command=self.dismiss_update, relief="flat", bg="#fff4cc").pack(side="right", padx=6); self.update_btn = tk.Button(self.update_bar, text="Update now", relief="groove"); self.update_btn.pack(side="right", padx=4)
         top = ttk.Frame(self); top.pack(fill="x", padx=8, pady=6); self.top_frame = top
         self.game_lbl = ttk.Label(top, text="Game folder: (not set)"); self.game_lbl.pack(side="left"); ttk.Button(top, text="Change...", command=self.pick_game).pack(side="left", padx=8)
         ttk.Button(top, text="Open .fantome...", command=self.open_fantome).pack(side="right"); ttk.Button(top, text="New pack", command=self.new_pack).pack(side="right", padx=6)
@@ -101,10 +102,26 @@ class App(tk.Tk):
         threading.Thread(target=w, daemon=True).start()
     def show_update(self, result):
         if not result: return
-        tag, url = result
+        tag = result["tag"]
         if self.set.get("dismissed_update") == tag: return
-        self.update_tag = tag; self.update_lbl.configure(text="A newer version is available: %s (you are running v%s)." % (tag, updater.VERSION))
-        self.update_btn.configure(command=lambda: __import__("webbrowser").open(url)); self.update_bar.pack(side="top", fill="x", before=self.top_frame)
+        self.update_info = result; self.update_tag = tag
+        can_install = bool(getattr(sys, "frozen", False) and result.get("asset_url"))
+        self.update_lbl.configure(text="A newer version is available: %s (you are running v%s)." % (tag, updater.VERSION))
+        self.update_btn.configure(text="Update now" if can_install else "Open download page", state="normal", command=self.install_update if can_install else self.open_update_page)
+        self.update_bar.pack(side="top", fill="x", before=self.top_frame)
+    def open_update_page(self): __import__("webbrowser").open(self.update_info["url"])
+    def install_update(self):
+        info = self.update_info; tag = info["tag"]; dest = os.path.join(__import__("tempfile").gettempdir(), "EmoteQoL_update.exe")
+        self.update_btn.configure(state="disabled", text="Updating..."); self.update_lbl.configure(text="Downloading EmoteQoL %s ..." % tag)
+        def progress(done, total): self.q.put(lambda: self.update_lbl.configure(text="Downloading EmoteQoL %s ... %d%%" % (tag, (100 * done // total) if total else 0)))
+        def work(): return updater.download(info["asset_url"], dest, info.get("size"), info.get("digest"), progress)
+        def done(r, err):
+            if err:
+                self.update_lbl.configure(text="The update could not be installed (%s)." % (err.strip().splitlines()[-1][:120] if err else ""))
+                self.update_btn.configure(text="Open download page", state="normal", command=self.open_update_page); return
+            self.update_lbl.configure(text="Installing %s and restarting..." % tag); self.update()
+            updater.apply_and_restart(r, installer.exe_path()); self.after(400, self.destroy)
+        self.run_bg(work, done)
     def dismiss_update(self):
         self.set["dismissed_update"] = getattr(self, "update_tag", ""); save_settings(self.set); self.update_bar.pack_forget()
     def _poll(self):
@@ -587,7 +604,6 @@ class App(tk.Tk):
 
 def main():
     from emoteqol import installer
-    if getattr(sys, "frozen", False) and installer.installed_here() and installer.maybe_update(): sys.exit(0)
     if getattr(sys, "frozen", False) and installer.installed_here(): installer.copy_source(os.path.dirname(installer.exe_path()))
     if getattr(sys, "frozen", False) and not installer.installed_here():
         dst = installer.run_installer()
