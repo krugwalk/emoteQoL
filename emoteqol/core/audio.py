@@ -185,7 +185,7 @@ def pcm_wem(pcm):
     body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(data)) + data
     return b"RIFF" + struct.pack("<I", len(body)) + body
 
-def make_wem(path, max_seconds=6, boost_db=12.0, dynamics="Evened out"):
+def make_wem(path, max_seconds=6, boost_db=-4.0, dynamics="Evened out"):
     if path.lower().endswith(".wem"):
         d = open(path, "rb").read(); tag = struct.unpack_from("<H", d, 20)[0] if d[:4] == b"RIFF" and d[12:16] == b"fmt " else None
         if tag is None: raise RuntimeError("That .wem isn't a RIFF audio file.")
@@ -267,7 +267,7 @@ def _write_wav(path, pcm, boost_db=None, ratio=1.0):
     data = array.array("h", (np.clip(y, -1.0, 1.0) * 32000).astype(np.int16).tolist())
     w = wave.open(path, "wb"); w.setnchannels(1); w.setsampwidth(2); w.setframerate(RATE); w.writeframes(data.tobytes()); w.close()
 
-def wwise_convert(wc, proj, pcm, boost_db=12.0, ratio=1.0):
+def wwise_convert(wc, proj, pcm, boost_db=-4.0, ratio=1.0):
     work = tempfile.mkdtemp(prefix="emote_wem_")
     try:
         inp = os.path.join(work, "in"); out = os.path.join(work, "out"); os.makedirs(inp); os.makedirs(out); _write_wav(os.path.join(inp, "clip.wav"), pcm, boost_db, ratio)
