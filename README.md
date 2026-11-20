@@ -10,7 +10,7 @@ You can start from nothing, or open a `.fantome` you already have and change jus
 
 1. Go to the [Releases page](https://github.com/krugwalk/emoteQoL/releases/latest).
 2. Download `EmoteQoL.exe`. You do not need Python.
-3. Run it. The first time, it installs itself, finds your League of Legends folder (or asks you to pick it) and can add a desktop shortcut.
+3. Run it. The first time, it installs itself: it finds your League of Legends folder (or asks you to pick it), lets you choose where to install the app (the default is a folder in your user profile), and can add a desktop shortcut.
 
 If Windows SmartScreen warns about an unknown app, choose "More info" then "Run anyway". The exe is not code-signed.
 
