@@ -357,7 +357,7 @@ class App(tk.Tk):
         except Exception: sp = 1.0
         return max(15, int(self.repl_durs[i % len(self.repl_durs)] * 1000 / sp))
     def update_scene(self):
-        if not hasattr(self, "scene_lbl"): return
+        if not hasattr(self, "scene_lbl") or self.popup_playing: return
         pic = None
         if self.edit_src:
             try: pic = C.fit_frame(self.edit_src[self.cur_i % len(self.edit_src)], 160, self.fit_v.get(), self.adj())
