@@ -413,7 +413,10 @@ class App(tk.Tk):
         for f in self.repl_frames:
             if max(f.size) <= 700: self.edit_src.append(f)
             else: g = f.copy(); g.thumbnail((700, 700), Image.LANCZOS); self.edit_src.append(g)
-        self.repl_path = "(from the pack) " + em["name"]; self.fit_v.set("stretch"); self.loops_v.set(100.0); self.size_v.set(100); self._size_changed()
+        self.repl_path = "(from the pack) " + em["name"]; self.fit_v.set("stretch"); self.loops_v.set(100.0)
+        try: size, layers = C.popup_settings(self.game, em, self.pack.emotes[em["key"]]["files"], self.pack.other)
+        except Exception: size, layers = 100, 0
+        self.size_v.set(size); self._size_changed(); self.opa_v.set(["Normal (like the game)", "More solid (2 layers)", "Very solid (3 layers)"][layers])
         self.src_lbl.configure(text="%s   (%d frame%s, loaded from the pack - move, stretch or change it, then press Add)" % (em["name"], len(self.repl_frames), "" if len(self.repl_frames) == 1 else "s"))
         self.reset_adj(); self.play(0); self.update_add(); self.busy("Loaded '%s' from the pack into the editor." % em["name"])
     def remove_selected(self):

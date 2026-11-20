@@ -221,6 +221,53 @@ def flipbook_info(binbytes, vfx_path):
             if cols >= 1 and rows >= 1 and count >= 1: return cols, rows, int(count), (float(fps) if fps else None)
     return None
 
+def popup_emitters(binbytes, vfx_path):
+    d = bytearray(binbytes); BP.RANGES.clear(); ents = BP.parse(bytes(d)); out = []; target = vfx_path.lower()
+    for entry in ents:
+        if ents[entry][0] != 0x45cd899f: continue
+        BP.RANGES.clear(); BP.parse(bytes(d)); ln_off, lst = _spans(d, entry)
+        if not lst: continue
+        for it in lst["items"]:
+            F = _fields(d, it["start"])
+            if FLAGS["tex"] not in F: continue
+            ft, vs = F[FLAGS["tex"]]; n = struct.unpack_from("<H", d, vs)[0]
+            if bytes(d[vs + 2:vs + 2 + n]).decode("latin1").lower() != target: continue
+            name = BP.value(BP.R(bytes(d), F[FLAGS["name"]][1]), F[FLAGS["name"]][0]) if FLAGS["name"] in F else ""
+            blend = BP.value(BP.R(bytes(d), F[FLAGS["blend"]][1]), F[FLAGS["blend"]][0]) if FLAGS["blend"] in F else None
+            scale = None
+            if FLAGS["birthscale"] in F:
+                try:
+                    ft2, vs2 = _fields(d, F[FLAGS["birthscale"]][1])[0xb4b427aa]
+                    if ft2 == 12: scale = struct.unpack_from("<3f", d, vs2)
+                except KeyError: pass
+            out.append(dict(name=name, blend=blend, scale=scale))
+    return out
+
+def popup_settings(game, em, files, other):
+    key = em["vfx"].lower().encode(); mine = None
+    for name, data in list(files.items()) + list(other.items()):
+        if name.lower().endswith(".bin") and isinstance(data, (bytes, bytearray)) and key in bytes(data).lower():
+            try: mine = popup_emitters(data, em["vfx"])
+            except Exception: mine = None
+            if mine: break
+    if not mine: return 100, 0
+    orig = None
+    for bh in emote_bins(game):
+        d = game.read(bh)
+        if d and key in d.lower():
+            try: orig = popup_emitters(d, em["vfx"])
+            except Exception: orig = None
+            if orig: break
+    if not orig: return 100, 0
+    size = 100
+    for m in mine:
+        o = next((x for x in orig if x["name"] == m["name"] and x["scale"] and x["scale"][0] > 0), None)
+        if m["scale"] and o:
+            size = int(round(m["scale"][0] / o["scale"][0] * 100 / 5.0) * 5); break
+    normal = lambda L: sum(1 for x in L if x["blend"] == 1)
+    layers = max(1, int(round(normal(mine) / max(1, normal(orig)))))
+    return max(20, min(200, size)), min(2, layers - 1)
+
 def extract_frames(em, files, other):
     key = em["vfx"].lower()
     tex = files.get(key)
