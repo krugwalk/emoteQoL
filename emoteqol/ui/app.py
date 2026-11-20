@@ -534,6 +534,7 @@ class App(tk.Tk):
 def main():
     from emoteqol import installer
     if getattr(sys, "frozen", False) and installer.installed_here() and installer.maybe_update(): sys.exit(0)
+    if getattr(sys, "frozen", False) and installer.installed_here(): installer.copy_source(os.path.dirname(installer.exe_path()))
     if getattr(sys, "frozen", False) and not installer.installed_here():
         dst = installer.run_installer()
         if dst:

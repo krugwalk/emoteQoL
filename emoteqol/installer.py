@@ -32,10 +32,29 @@ def make_shortcut(lnk, target, icon, workdir):
           % (lnk.replace("'", "''"), target.replace("'", "''"), icon.replace("'", "''"), workdir.replace("'", "''")))
     subprocess.run(["powershell", "-NoProfile", "-Command", ps], check=True, timeout=30, creationflags=0x08000000)
 
+SOURCE_FILES = ("README.md", "LICENSE", "requirements.txt", "build.bat", ".gitignore")
+
+def source_root():
+    base = getattr(sys, "_MEIPASS", None)
+    if base:
+        p = os.path.join(base, "source")
+        return p if os.path.isdir(p) else None
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return root if os.path.isdir(os.path.join(root, "emoteqol")) else None
+
+def copy_source(d):
+    root = source_root()
+    if not root: return
+    try:
+        shutil.copytree(os.path.join(root, "emoteqol"), os.path.join(d, "emoteqol"), dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        for f in SOURCE_FILES:
+            if os.path.exists(os.path.join(root, f)): shutil.copy2(os.path.join(root, f), os.path.join(d, f))
+    except Exception: pass
+
 def do_install(final_dir, shortcut=True, dest=None):
     d = dest or install_dir(); os.makedirs(d, exist_ok=True); dst = os.path.join(d, APP + ".exe")
     if os.path.normcase(exe_path()) != os.path.normcase(dst): shutil.copy2(exe_path(), dst)
-    ico = os.path.join(d, "icon.ico"); shutil.copy2(resource("icon.ico"), ico)
+    ico = dst; copy_source(d)
     s = {}
     try: s = json.load(open(os.path.join(C.APPDATA, "settings.json")))
     except Exception: pass
