@@ -29,7 +29,7 @@ class App(tk.Tk):
         tk.Button(self.update_bar, text="Dismiss", command=self.dismiss_update, relief="flat", bg="#fff4cc").pack(side="right", padx=6); self.update_btn = tk.Button(self.update_bar, text="Update now", relief="groove"); self.update_btn.pack(side="right", padx=4)
         top = ttk.Frame(self); top.pack(fill="x", padx=8, pady=6); self.top_frame = top
         self.game_lbl = ttk.Label(top, text="Game folder: (not set)"); self.game_lbl.pack(side="left"); ttk.Button(top, text="Change...", command=self.pick_game).pack(side="left", padx=8)
-        ttk.Button(top, text="Open .fantome...", command=self.open_fantome).pack(side="right"); ttk.Button(top, text="New pack", command=self.new_pack).pack(side="right", padx=6)
+        ttk.Button(top, text="Open .fantome...", command=self.open_fantome).pack(side="right"); ttk.Button(top, text="New pack", command=self.new_pack).pack(side="right", padx=6); self.check_btn = ttk.Button(top, text="Check for updates", command=self.check_updates_now); self.check_btn.pack(side="right")
         nb = ttk.Notebook(self); self.nb = nb; tab_e = ttk.Frame(nb); nb.add(tab_e, text="  Emotes  ")
         main = ttk.PanedWindow(tab_e, orient="horizontal"); main.pack(fill="both", expand=True, padx=4, pady=4)
         left = ttk.Frame(main); main.add(left, weight=1)
@@ -100,10 +100,19 @@ class App(tk.Tk):
             try: r = fn(); self.q.put(lambda: done(r, None))
             except Exception as e: tb = traceback.format_exc(); self.q.put(lambda: done(None, tb))
         threading.Thread(target=w, daemon=True).start()
-    def show_update(self, result):
+    def check_updates_now(self):
+        self.check_btn.configure(state="disabled", text="Checking...")
+        def done(r, err):
+            self.check_btn.configure(state="normal", text="Check for updates")
+            status, info = r if r else ("error", None)
+            if status == "update": self.show_update(info, force=True)
+            elif status == "current": messagebox.showinfo("Check for updates", "You have the latest version (v%s)." % updater.VERSION)
+            else: messagebox.showinfo("Check for updates", "Could not reach GitHub to look for a new version. Check your internet connection and try again.")
+        self.run_bg(updater.check_status, done)
+    def show_update(self, result, force=False):
         if not result: return
         tag = result["tag"]
-        if self.set.get("dismissed_update") == tag: return
+        if self.set.get("dismissed_update") == tag and not force: return
         self.update_info = result; self.update_tag = tag
         can_install = bool(getattr(sys, "frozen", False) and result.get("asset_url"))
         self.update_lbl.configure(text="A newer version is available: %s (you are running v%s)." % (tag, updater.VERSION))
@@ -561,6 +570,7 @@ class App(tk.Tk):
         self.size_v.set(size); self._size_changed()
     def edit_from_pack_inner(self, em, frames, durs):
         from emoteqol.core import audio as A
+        self.clear_sound(); self.snd_boost_v.set(0.0)
         self.nb.select(0)
         if self.sv.get(): self.sv.set("")
         idx = next((i for i, x in enumerate(self.matches) if x["key"] == em["key"]), None)

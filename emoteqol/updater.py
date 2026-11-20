@@ -7,7 +7,7 @@ import tempfile
 import threading
 import urllib.request
 
-VERSION = "1.13.3"
+VERSION = "1.13.4"
 REPO = "krugwalk/emoteQoL"
 ASSET_NAME = "EmoteQoL.exe"
 
@@ -22,24 +22,37 @@ def newer(latest, current=VERSION):
     a, b = parse(latest), parse(current)
     return bool(a) and a > b
 
+def _release_info(data, current):
+    tag = data.get("tag_name", "")
+    if not newer(tag, current):
+        return None
+    asset = next((a for a in data.get("assets", []) if a.get("name") == ASSET_NAME), None)
+    return dict(
+        tag=tag,
+        url=data.get("html_url") or "https://github.com/%s/releases/latest" % REPO,
+        asset_url=asset.get("browser_download_url") if asset else None,
+        size=asset.get("size") if asset else None,
+        digest=asset.get("digest") if asset else None,
+    )
+
+def _fetch(timeout):
+    req = urllib.request.Request(api_url(), headers={"User-Agent": "EmoteQoL-update-check", "Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
 def check(current=VERSION, timeout=6):
     try:
-        req = urllib.request.Request(api_url(), headers={"User-Agent": "EmoteQoL-update-check", "Accept": "application/vnd.github+json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            data = json.loads(r.read().decode("utf-8"))
-        tag = data.get("tag_name", "")
-        if not newer(tag, current):
-            return None
-        asset = next((a for a in data.get("assets", []) if a.get("name") == ASSET_NAME), None)
-        return dict(
-            tag=tag,
-            url=data.get("html_url") or "https://github.com/%s/releases/latest" % REPO,
-            asset_url=asset.get("browser_download_url") if asset else None,
-            size=asset.get("size") if asset else None,
-            digest=asset.get("digest") if asset else None,
-        )
+        return _release_info(_fetch(timeout), current)
     except Exception:
         return None
+
+def check_status(current=VERSION, timeout=10):
+    try:
+        data = _fetch(timeout)
+    except Exception:
+        return "error", None
+    info = _release_info(data, current)
+    return ("update", info) if info else ("current", None)
 
 def check_async(callback, current=VERSION):
     def run():
