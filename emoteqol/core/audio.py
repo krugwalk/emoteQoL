@@ -28,6 +28,15 @@ def event_for_emote(game, em, emote_bin_list):
                     if fh == 0xe0c375ae and isinstance(v, str) and v: return str(v)
     return None
 
+def stock_level(game, event_name):
+    ob = common_wad(game).read(SFX_BNK); secs, objs = bank.parse_bank(ob)
+    for sid, mid in event_sounds(ob, event_name) or []:
+        o = _volume_prop(ob, objs, sid)
+        if o is None: return 0.0
+        v = struct.unpack_from("<f", ob, o)[0]
+        if v > -60: return float(v)
+    return 0.0
+
 def event_from_bin(data, vfx_path):
     target = vfx_path.lower().encode()
     if target not in bytes(data).lower(): return None

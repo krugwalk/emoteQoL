@@ -66,7 +66,7 @@ class App(tk.Tk):
         ttk.Button(sb_, text="Choose sound...", command=self.pick_sound).grid(row=0, column=0, padx=6, pady=4); self.sound_lbl = ttk.Label(sb_, text="none - the emote keeps its normal sound", wraplength=330); self.sound_lbl.grid(row=0, column=1, sticky="w")
         ttk.Button(sb_, text="Clear", command=self.clear_sound).grid(row=0, column=2, padx=6); ttk.Button(sb_, text="Use another emote's sound...", command=self.pick_game_sound).grid(row=0, column=3, padx=6)
         r3 = ttk.Frame(sb_); r3.grid(row=1, column=0, columnspan=4, sticky='w', padx=6)
-        ttk.Label(r3, text='Game volume (dB):').pack(side='left'); self.snd_boost_v = tk.DoubleVar(value=-5.0); ttk.Spinbox(r3, from_=-30, to=24, increment=1, textvariable=self.snd_boost_v, width=5).pack(side='left', padx=4); ttk.Button(r3, text='Find LtMAO...', command=self.find_ltmao).pack(side='left', padx=10)
+        ttk.Label(r3, text="Volume (dB, 0 = the game's own):").pack(side='left'); self.snd_boost_v = tk.DoubleVar(value=8.0); ttk.Spinbox(r3, from_=-30, to=24, increment=1, textvariable=self.snd_boost_v, width=5).pack(side='left', padx=4); ttk.Button(r3, text='Find LtMAO...', command=self.find_ltmao).pack(side='left', padx=10)
         self.ltmao_lbl = ttk.Label(r3, text='', foreground='#666'); self.ltmao_lbl.pack(side='left')
         ttk.Label(sb_, text='Your own mp3/wav/ogg/mp4 is converted with the Wwise that comes with LtMAO. Shorten it with the Sound length slider.', foreground='#666', wraplength=520).grid(row=2, column=0, columnspan=4, sticky='w', padx=6, pady=(0, 4))
         self.after(600, self._ltmao_status)
@@ -306,8 +306,9 @@ class App(tk.Tk):
         try: smax = max(0.3, float(self.snd_max_v.get()))
         except Exception: smax = 6.0
         try: sboost = min(24.0, max(-30.0, float(self.snd_boost_v.get())))
-        except Exception: sboost = -5.0
+        except Exception: sboost = 8.0
         def job():
+            from emoteqol.core import audio as A
             files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, mem, flat) if path else (C.build_size_only(self.game, e, size, flat) if size != 100 else ({}, [])); snd = None
             if spath or sgame:
                 from emoteqol.core import audio as A
@@ -317,9 +318,10 @@ class App(tk.Tk):
                 elif sgame:
                     snd = dict(event=ev, wem=None, pcm=False, retarget=sgame["event"], source="sound of '%s'" % sgame["name"], note="plays the in-game sound of %s" % sgame["name"]); notes.append("sound: plays the in-game sound of '%s'" % sgame["name"])
                 else:
-                    wem, pcm, note = A.make_wem(spath, smax); snd = dict(event=ev, wem=wem, pcm=pcm, level=sboost, source=os.path.basename(spath), note=note); notes.append("sound (%s): %s" % (ev, note))
-            elif keep and keep.get("level") is not None and abs(sboost - keep["level"]) > 0.01:
-                snd = dict(event=keep["event"], keep=True, wem=None, pcm=False, level=sboost, source="current sound, volume changed", note="volume set to %g dB" % sboost); notes.append("sound: kept, volume %g dB" % sboost)
+                    wem, pcm, note = A.make_wem(spath, smax); snd = dict(event=ev, wem=wem, pcm=pcm, level=A.stock_level(self.game, ev) + sboost, source=os.path.basename(spath), note=note); notes.append("sound (%s): %s" % (ev, note))
+            elif keep and keep.get("level") is not None and abs(A.stock_level(self.game, keep["event"]) + sboost - keep["level"]) > 0.01:
+                from emoteqol.core import audio as A
+                snd = dict(event=keep["event"], keep=True, wem=None, pcm=False, level=A.stock_level(self.game, keep["event"]) + sboost, source="current sound, volume changed", note="volume %+g dB from the game's own" % sboost); notes.append("sound: kept, volume %+g dB from the game's own" % sboost)
             return files, notes, snd
         def done(r, err):
             self.update_add()
@@ -442,7 +444,7 @@ class App(tk.Tk):
         except Exception: snd = None
         if snd and snd["found"] and (snd["custom"] or snd["retargeted"]) and not (self.sound_path or self.sound_game):
             self.sound_keep = snd
-            if snd["level"] is not None: self.snd_boost_v.set(snd["level"])
+            if snd["level"] is not None: self.snd_boost_v.set(round(snd["level"] - (snd["orig_level"] if snd["orig_level"] is not None else 0.0), 1))
             self.sound_lbl.configure(text="keeping the sound already in the pack%s (pick another to replace it)" % ((", %.1f s" % snd["seconds"]) if snd["seconds"] else ""))
         self.size_v.set(size); self._size_changed()
         self.src_lbl.configure(text="%s   (%d frame%s, loaded from the pack - move, stretch or change it, then press Add)" % (em["name"], len(self.repl_frames), "" if len(self.repl_frames) == 1 else "s"))
@@ -458,10 +460,10 @@ class App(tk.Tk):
         if not self.cat: return messagebox.showinfo("Wait", "The emote list is still loading.")
         p = filedialog.askopenfilename(title="Open a .fantome", filetypes=[("Fantome mods", "*.fantome *.zip"), ("All files", "*.*")])
         if not p: return
-        try: self.pack = C.import_fantome(p, self.cat)
+        try: self.pack = C.import_fantome(p, self.cat); self.old_fixed = C.fix_old_popups(self.pack, self.cat)
         except Exception as e: return messagebox.showerror("Could not open", traceback.format_exc()[-600:])
         i = self.pack.info; self.name_v.set(i.get("Name", "")); self.auth_v.set(i.get("Author", "")); self.lic_v.set(i.get("License", "")); self.detect_pop_state(); self.pop_v.set(self.pack.silence_pop); self.refresh_pack(); self.skin_tab.on_pack_opened()
-        self.busy("Opened %s: %d emote replacement(s), %d skin art; %d other file(s) are kept untouched." % (os.path.basename(p), len(self.pack.emotes), len(self.pack.art), len(self.pack.other)))
+        self.busy("Opened %s: %d emote replacement(s), %d skin art; %d other file(s) are kept untouched.%s" % (os.path.basename(p), len(self.pack.emotes), len(self.pack.art), len(self.pack.other), (" Cleaned the popup of %d emote(s) saved by an older version." % self.old_fixed) if getattr(self, "old_fixed", 0) else ""))
     def save_fantome(self):
         if not self.pack.emotes and not self.pack.other and not self.pack.art: return messagebox.showinfo("Nothing to save", "Add an emote replacement or a loading screen / HUD picture first.")
         p = filedialog.asksaveasfilename(title="Save .fantome", defaultextension=".fantome", initialfile=(self.name_v.get() or "My Emotes") + ".fantome", filetypes=[("Fantome mod", "*.fantome")])

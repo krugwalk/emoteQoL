@@ -290,6 +290,39 @@ def extract_frames(em, files, other):
     step = 1.0 / fps if fps else 1.0 / 12.0
     return frames, [step] * len(frames), fps
 
+def unstack_popup(binbytes, vfx_path):
+    d = bytearray(binbytes); BP.RANGES.clear(); ents = BP.parse(bytes(d)); removed = 0; target = vfx_path.lower()
+    for entry in sorted(ents, key=lambda e: -BP.RANGES[e][0]):
+        if ents[entry][0] != 0x45cd899f: continue
+        BP.RANGES.clear(); BP.parse(bytes(d)); ln_off, lst = _spans(d, entry)
+        if not lst: continue
+        items = lst["items"]; drop = []
+        for i in range(1, len(items)):
+            a, b = items[i - 1], items[i]
+            if bytes(d[a["start"]:a["end"]]) == bytes(d[b["start"]:b["end"]]): drop.append(i)
+        if not drop: continue
+        uses = False
+        for it in items:
+            F = _fields(d, it["start"])
+            if FLAGS["tex"] in F:
+                ft, vs = F[FLAGS["tex"]]; n = struct.unpack_from("<H", d, vs)[0]
+                if bytes(d[vs + 2:vs + 2 + n]).decode("latin1").lower() == target: uses = True
+        if not uses: continue
+        total = 0
+        for i in reversed(drop):
+            it = items[i]; total += it["end"] - it["start"]; del d[it["start"]:it["end"]]
+        struct.pack_into("<I", d, lst["size_off"], struct.unpack_from("<I", d, lst["size_off"])[0] - total)
+        struct.pack_into("<I", d, lst["size_off"] + 4, struct.unpack_from("<I", d, lst["size_off"] + 4)[0] - len(drop))
+        struct.pack_into("<I", d, ln_off, struct.unpack_from("<I", d, ln_off)[0] - total)
+        removed += len(drop)
+    BP.RANGES.clear(); BP.parse(bytes(d))
+    return bytes(d), removed
+
+def clean_popup(binbytes, vfx_path):
+    d, a = unstack_popup(binbytes, vfx_path)
+    d, b = flatten_popup(d, vfx_path)
+    return d, a + b
+
 def flatten_popup(binbytes, vfx_path):
     d = bytearray(binbytes); BP.RANGES.clear(); ents = BP.parse(bytes(d)); removed = 0; target = vfx_path.lower()
     for entry in ents:
@@ -446,6 +479,22 @@ def _same_game_file(zip_name, target):
         try: return int(stem, 16) == wadtool.h(path)
         except ValueError: return False
     return False
+
+def fix_old_popups(pack, catalogue):
+    fixed = 0
+    for key, e in pack.emotes.items():
+        em = next((x for x in catalogue if x["key"] == key), None)
+        if not em: continue
+        target = em["vfx"].lower().encode(); done = False
+        for store in (e["files"], pack.other):
+            for name in list(store):
+                data = store[name]
+                if name.lower().endswith(".bin") and isinstance(data, (bytes, bytearray)) and target in bytes(data).lower():
+                    try: nb, c = clean_popup(data, em["vfx"])
+                    except Exception: continue
+                    if c: store[name] = nb; done = True
+        if done: fixed += 1
+    return fixed
 
 def import_fantome(path, catalogue):
     p = Pack(); z = zipfile.ZipFile(path); by_inv = {e["inv"].lower(): e for e in catalogue}; by_base = {e["key"].lower(): e for e in catalogue}
