@@ -17,7 +17,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__(); self.title("EmoteQoL v%s - emotes, loading screens and HUD portraits with your own pictures" % updater.VERSION); self.geometry("1180x1050"); self.minsize(1000, 800)
         self.set = load_settings(); self.game = None; self.cat = []; self.cur = None; self.pack = C.Pack(); self.icons = {}; self.photo_refs = {}; self.q = queue.Queue()
-        self.cur_i = 0; self.repl_path = None; self.mem_frames = None; self.repl_frames = []; self.repl_durs = []; self.anim_job = None; self.matches = []
+        self.cur_i = 0; self.sound_keep = None; self.repl_path = None; self.mem_frames = None; self.repl_frames = []; self.repl_durs = []; self.anim_job = None; self.matches = []
         self._ui(); self.after(100, self._poll); self.after(200, self.open_game); self.after(2500, lambda: updater.check_async(lambda r: self.q.put(lambda: self.show_update(r))))
 
     def _ui(self):
@@ -57,12 +57,14 @@ class App(tk.Tk):
         self.size_scale.bind("<ButtonPress-1>", self._size_press, add="+"); self.size_scale.bind("<ButtonRelease-1>", self._size_release, add="+")
         ttk.Label(opt, text="Fit:").grid(row=1, column=0, sticky="w", padx=6); self.fit_v = tk.StringVar(value="contain"); cb = ttk.Combobox(opt, textvariable=self.fit_v, values=["contain", "cover", "stretch"], width=10, state="readonly"); cb.grid(row=1, column=1, sticky="w"); cb.bind("<<ComboboxSelected>>", lambda ev: self.refresh_preview())
         ttk.Label(opt, text="GIF speed (%):").grid(row=1, column=2, sticky="e", padx=(14, 4)); self.loops_v = tk.DoubleVar(value=100.0); ttk.Spinbox(opt, from_=10, to=500, increment=10, textvariable=self.loops_v, width=6).grid(row=1, column=3, sticky="w"); ttk.Label(opt, text="100 = the GIF's own speed", foreground="#666").grid(row=1, column=4, sticky="w", padx=6)
-        ttk.Label(opt, text="Solidity:").grid(row=2, column=0, sticky="w", padx=6); self.opa_v = tk.StringVar(value="Normal (like the game)")
+        ttk.Label(opt, text="Solidity:").grid(row=2, column=0, sticky="w", padx=6); self.opa_v = tk.StringVar(value="Very solid (3 layers)")
         ttk.Combobox(opt, textvariable=self.opa_v, values=["Normal (like the game)", "More solid (2 layers)", "Very solid (3 layers)"], width=21, state="readonly").grid(row=2, column=1, columnspan=2, sticky="w")
         ttk.Label(opt, text="Flash / glow:").grid(row=2, column=3, sticky="e", padx=(14, 4)); self.flat_v = tk.StringVar(value="Remove")
         ttk.Combobox(opt, textvariable=self.flat_v, values=["Remove", "Keep (like the game)"], width=18, state="readonly").grid(row=2, column=4, sticky="w")
+        self.bright_v = tk.DoubleVar(value=100.0); self.bright_lbl = ttk.Label(opt, text="Brightness: 100%", width=18); self.bright_lbl.grid(row=3, column=0, columnspan=2, sticky="w", padx=6)
+        ttk.Scale(opt, from_=40, to=120, variable=self.bright_v, length=200, command=self._bright_changed).grid(row=3, column=2, columnspan=3, sticky="w")
         sz = ttk.Frame(right); sz.pack(fill="x", pady=2); ttk.Button(sz, text="Reset position / size", command=self.reset_adj).pack(side="left", padx=6)
-        ttk.Label(sz, text="Edges stretch, corners keep proportions (Shift = free), wheel zooms. Bright square = what goes in the emote.", foreground="#666", wraplength=470).pack(side="left", padx=6)
+        ttk.Label(sz, text="Edges stretch, corners keep proportions (Shift = free), wheel zooms.", foreground="#666", wraplength=470).pack(side="left", padx=6)
         sl = ttk.Frame(right); sl.pack(fill="x", pady=2); ttk.Label(sl, text="Sound length:").pack(side="left", padx=6)
         self.snd_max_v = tk.DoubleVar(value=6.0); self.snd_len = ttk.Scale(sl, from_=0.3, to=6.0, variable=self.snd_max_v, command=lambda v: self._len_label(), length=300); self.snd_len.pack(side="left", padx=4); self.snd_len.state(["disabled"])
         self.snd_len_lbl = ttk.Label(sl, text="(pick a sound first)", foreground="#666"); self.snd_len_lbl.pack(side="left", padx=6); self.snd_total = 6.0
@@ -72,7 +74,7 @@ class App(tk.Tk):
         r3 = ttk.Frame(sb_); r3.grid(row=1, column=0, columnspan=4, sticky='w', padx=6)
         ttk.Label(r3, text='Game volume (dB):').pack(side='left'); self.snd_boost_v = tk.DoubleVar(value=-5.0); ttk.Spinbox(r3, from_=-30, to=24, increment=1, textvariable=self.snd_boost_v, width=5).pack(side='left', padx=4); ttk.Button(r3, text='Find LtMAO...', command=self.find_ltmao).pack(side='left', padx=10)
         self.ltmao_lbl = ttk.Label(r3, text='', foreground='#666'); self.ltmao_lbl.pack(side='left')
-        ttk.Label(sb_, text='Your own .mp3/.wav/.ogg/.mp4 is converted to a real game .wem with the Wwise that comes with LtMAO (found automatically). Use the Sound length slider to shorten it - the game cuts long sound effects. A ready-made .wem is used as it is.', foreground='#666', wraplength=520).grid(row=2, column=0, columnspan=4, sticky='w', padx=6, pady=(0, 4))
+        ttk.Label(sb_, text='Your own mp3/wav/ogg/mp4 is converted with the Wwise that comes with LtMAO. Shorten it with the Sound length slider.', foreground='#666', wraplength=520).grid(row=2, column=0, columnspan=4, sticky='w', padx=6, pady=(0, 4))
         self.after(600, self._ltmao_status)
         self.add_btn = ttk.Button(right, text="Add replacement to pack  >>", command=self.add_to_pack, state="disabled"); self.add_btn.pack(anchor="w", pady=6)
         self.log = tk.Text(right, height=1, wrap="word", state="disabled"); self.log.pack(fill="x")
@@ -279,6 +281,8 @@ class App(tk.Tk):
         if not self.repl_frames: return
         self.cur_i = i % len(self.repl_frames); self.draw_editor()
         if len(self.repl_frames) > 1: self.anim_job = self.after(int(self.repl_durs[i % len(self.repl_durs)] * 1000), lambda: self.play(i + 1))
+    def _bright_changed(self, v=None):
+        r = int(round(float(self.bright_v.get()) / 5.0) * 5); self.bright_v.set(r); self.bright_lbl.configure(text="Brightness: %d%%" % r)
     def _size_changed(self, v=None):
         r = int(round(float(self.size_v.get()) / 5.0) * 5); self.size_v.set(r); self.size_lbl.configure(text="In-game size: %d%%" % r); self.update_add()
         if self.size_down: self._size_show()
@@ -304,15 +308,15 @@ class App(tk.Tk):
 
     def add_to_pack(self):
         e = self.cur; path = self.repl_path; animated = self.anim_v.get(); fit = self.fit_v.get(); loops = float(self.loops_v.get()); adj = self.adj()
-        size = int(round(self.size_v.get())); flat = self.flat_v.get() == "Remove"; opa = {"Normal (like the game)": 0, "More solid (2 layers)": 1, "Very solid (3 layers)": 2}.get(self.opa_v.get(), 0); qual = "compact"
+        bright = int(round(self.bright_v.get())); size = int(round(self.size_v.get())); flat = self.flat_v.get() == "Remove"; opa = {"Normal (like the game)": 0, "More solid (2 layers)": 1, "Very solid (3 layers)": 2}.get(self.opa_v.get(), 0); qual = "compact"
         self.busy("Building the replacement for '%s'..." % e["name"]); self.add_btn.configure(state="disabled")
-        spath = self.sound_path; sgame = self.sound_game; mem = self.mem_frames if (self.mem_frames and path == self.repl_path) else None
+        spath = self.sound_path; sgame = self.sound_game; keep = self.sound_keep if not (self.sound_path or self.sound_game) else None; mem = self.mem_frames if (self.mem_frames and path == self.repl_path) else None
         try: smax = max(0.3, float(self.snd_max_v.get()))
         except Exception: smax = 6.0
         try: sboost = min(24.0, max(-30.0, float(self.snd_boost_v.get())))
         except Exception: sboost = -5.0
         def job():
-            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, mem, flat) if path else (C.build_size_only(self.game, e, size, flat) if size != 100 else ({}, [])); snd = None
+            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, mem, flat, bright) if path else (C.build_size_only(self.game, e, size, flat) if size != 100 else ({}, [])); snd = None
             if spath or sgame:
                 from emoteqol.core import audio as A
                 ev = A.event_for_emote(self.game, e, C.emote_bins(self.game))
@@ -322,6 +326,8 @@ class App(tk.Tk):
                     snd = dict(event=ev, wem=None, pcm=False, retarget=sgame["event"], source="sound of '%s'" % sgame["name"], note="plays the in-game sound of %s" % sgame["name"]); notes.append("sound: plays the in-game sound of '%s'" % sgame["name"])
                 else:
                     wem, pcm, note = A.make_wem(spath, smax); snd = dict(event=ev, wem=wem, pcm=pcm, level=sboost, source=os.path.basename(spath), note=note); notes.append("sound (%s): %s" % (ev, note))
+            elif keep and keep.get("level") is not None and abs(sboost - keep["level"]) > 0.01:
+                snd = dict(event=keep["event"], keep=True, wem=None, pcm=False, level=sboost, source="current sound, volume changed", note="volume set to %g dB" % sboost); notes.append("sound: kept, volume %g dB" % sboost)
             return files, notes, snd
         def done(r, err):
             self.update_add()
@@ -333,7 +339,7 @@ class App(tk.Tk):
         self.run_bg(job, done)
     def pick_sound(self):
         p = filedialog.askopenfilename(title="Choose a sound", filetypes=[("Sound", "*.wem *.wav *.mp3 *.ogg *.mp4 *.m4a *.flac"), ("All files", "*.*")])
-        if p: self.vid_sound_v.set(False); self.set_sound_file(p)
+        if p: self.vid_sound_v.set(False); self.sound_keep = None; self.set_sound_file(p)
     def _ltmao_status(self):
         from emoteqol.core import audio as A
         def work():
@@ -346,7 +352,7 @@ class App(tk.Tk):
         if A.set_ltmao(p): self.ltmao_lbl.configure(text="LtMAO found - your own sounds will work")
         else: messagebox.showerror("Not LtMAO", "That folder doesn't contain LtMAO's Wwise converter (res/wiwawe/...). Pick the LtMAO folder that has start.bat in it.")
     def clear_sound(self):
-        self.sound_path = None; self.sound_game = None; self.vid_sound_v.set(False); self.sound_lbl.configure(text="none - the emote keeps its normal sound"); self.snd_len.state(["disabled"]); self.snd_len_lbl.configure(text="(pick a sound first)"); self.update_add()
+        self.sound_path = None; self.sound_game = None; self.sound_keep = None; self.vid_sound_v.set(False); self.sound_lbl.configure(text="none - the emote keeps its normal sound"); self.snd_len.state(["disabled"]); self.snd_len_lbl.configure(text="(pick a sound first)"); self.update_add()
     def pick_game_sound(self):
         from emoteqol.core import audio as A
         dlg = tk.Toplevel(self); dlg.title("Use the sound of another emote"); dlg.geometry("460x520"); dlg.transient(self)
@@ -377,6 +383,13 @@ class App(tk.Tk):
                 except Exception: pass
             self.ptree.insert("", "end", iid=key, text="  " + e["name"], values=(e["source"], e["note"]), image=img)
         for key, a in self.pack.art.items(): self.ptree.insert("", "end", iid="art|" + key, text="  " + a["name"], values=(a.get("source", ""), a.get("note", "")), image=self.placeholder)
+    def detect_pop_state(self):
+        from emoteqol.core import audio as A
+        try:
+            if self.pack.other.get("WAD/Common.wad.client/%016x.wpk" % A.PK_HASH):
+                em = next((x for x in self.cat if x["key"] in self.pack.emotes), None) or self.cat[0]
+                self.pack.silence_pop = bool(A.detect_pack_sound(self.game, em, {}, self.pack.other)["pop_silenced"])
+        except Exception: pass
     def view_selected(self, ev=None):
         sel = [k for k in self.ptree.selection() if not k.startswith("art|")]
         if not sel: return messagebox.showinfo("Pick an emote", "Select an emote in the pack list first.")
@@ -393,6 +406,9 @@ class App(tk.Tk):
         def tick():
             state["i"] = (state["i"] + 1) % len(shots); lab.configure(image=shots[state["i"]]); state["job"] = dlg.after(int(max(30, durs[0] * 1000)), tick)
         if len(shots) > 1: state["job"] = dlg.after(int(max(30, durs[0] * 1000)), tick)
+        from emoteqol.core import audio as A
+        try: snd = A.detect_pack_sound(self.game, em, entry["files"], self.pack.other)
+        except Exception: snd = None
         total = sum(durs); ttk.Label(dlg, text="%d frame%s, %dx%d px%s" % (len(frames), "" if len(frames) == 1 else "s", frames[0].width, frames[0].height, (", %.1f s long" % total) if len(frames) > 1 else ""), foreground="#555").pack()
         def close():
             if state["job"]: dlg.after_cancel(state["job"])
@@ -403,9 +419,21 @@ class App(tk.Tk):
             if not p: return
             fr = [f.convert("RGBA") for f in frames]; fr[0].save(p, save_all=True, append_images=fr[1:], duration=[int(d * 1000) for d in durs], loop=0, disposal=2, optimize=False)
             messagebox.showinfo("Saved", "Saved:\n" + p)
+        if snd and snd["found"]:
+            kind = "plays another emote's sound" if snd["retargeted"] else ("custom sound" if snd["custom"] else "the game's normal sound")
+            info = "Sound: %s%s, volume %s dB%s" % (kind, (", %.1f s" % snd["seconds"]) if (snd["custom"] and snd["seconds"]) else "", ("%g" % snd["level"]) if snd["level"] is not None else "-", ("   (pop silenced)" if snd["pop_silenced"] else ""))
+            ttk.Label(dlg, text=info, foreground="#555", wraplength=300, justify="center").pack(pady=(6, 0))
+            if snd["custom"] and snd["wem"]:
+                def play():
+                    import tempfile, winsound
+                    p = tempfile.mktemp(suffix=".wav")
+                    if not A.wem_to_wav(snd["wem"], p): return messagebox.showinfo("Cannot play", "Playing needs LtMAO (its decoder). Click 'Find LtMAO...' in the Sound box first.")
+                    winsound.PlaySound(p, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                ttk.Button(dlg, text="Play the sound", command=play).pack(pady=(4, 0))
         row = ttk.Frame(dlg); row.pack(pady=12); ttk.Button(row, text="Edit this in the editor", command=edit_now).pack(side="left", padx=6); ttk.Button(row, text="Save as GIF...", command=save_gif).pack(side="left", padx=6); ttk.Button(row, text="Close", command=close).pack(side="left", padx=6)
         dlg.protocol("WM_DELETE_WINDOW", close)
     def edit_from_pack(self, em, frames, durs):
+        from emoteqol.core import audio as A
         self.nb.select(0); self.sv.set("")
         idx = next((i for i, x in enumerate(self.matches) if x["key"] == em["key"]), None)
         if idx is not None: self.tree.selection_set(str(idx)); self.tree.see(str(idx))
@@ -418,6 +446,14 @@ class App(tk.Tk):
         try: size, layers, flat = C.popup_settings(self.game, em, self.pack.emotes[em["key"]]["files"], self.pack.other)
         except Exception: size, layers, flat = 100, 0, False
         self.flat_v.set("Remove" if flat else "Keep (like the game)")
+        self.sound_keep = None
+        try: snd = A.detect_pack_sound(self.game, em, self.pack.emotes[em["key"]]["files"], self.pack.other)
+        except Exception: snd = None
+        if snd and snd["found"] and (snd["custom"] or snd["retargeted"]) and not (self.sound_path or self.sound_game):
+            self.sound_keep = snd
+            if snd["level"] is not None: self.snd_boost_v.set(snd["level"])
+            self.sound_lbl.configure(text="keeping the sound already in the pack%s (pick another to replace it)" % ((", %.1f s" % snd["seconds"]) if snd["seconds"] else ""))
+        self.bright_v.set(100); self._bright_changed()
         self.size_v.set(size); self._size_changed(); self.opa_v.set(["Normal (like the game)", "More solid (2 layers)", "Very solid (3 layers)"][layers])
         self.src_lbl.configure(text="%s   (%d frame%s, loaded from the pack - move, stretch or change it, then press Add)" % (em["name"], len(self.repl_frames), "" if len(self.repl_frames) == 1 else "s"))
         self.reset_adj(); self.play(0); self.update_add(); self.busy("Loaded '%s' from the pack into the editor." % em["name"])
@@ -434,7 +470,7 @@ class App(tk.Tk):
         if not p: return
         try: self.pack = C.import_fantome(p, self.cat)
         except Exception as e: return messagebox.showerror("Could not open", traceback.format_exc()[-600:])
-        i = self.pack.info; self.name_v.set(i.get("Name", "")); self.auth_v.set(i.get("Author", "")); self.lic_v.set(i.get("License", "")); self.pop_v.set(self.pack.silence_pop); self.refresh_pack(); self.skin_tab.on_pack_opened()
+        i = self.pack.info; self.name_v.set(i.get("Name", "")); self.auth_v.set(i.get("Author", "")); self.lic_v.set(i.get("License", "")); self.detect_pop_state(); self.pop_v.set(self.pack.silence_pop); self.refresh_pack(); self.skin_tab.on_pack_opened()
         self.busy("Opened %s: %d emote replacement(s), %d skin art; %d other file(s) are kept untouched." % (os.path.basename(p), len(self.pack.emotes), len(self.pack.art), len(self.pack.other)))
     def save_fantome(self):
         if not self.pack.emotes and not self.pack.other and not self.pack.art: return messagebox.showinfo("Nothing to save", "Add an emote replacement or a loading screen / HUD picture first.")

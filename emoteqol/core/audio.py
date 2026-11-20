@@ -28,6 +28,71 @@ def event_for_emote(game, em, emote_bin_list):
                     if fh == 0xe0c375ae and isinstance(v, str) and v: return str(v)
     return None
 
+def event_from_bin(data, vfx_path):
+    target = vfx_path.lower().encode()
+    if target not in bytes(data).lower(): return None
+    BP.RANGES.clear()
+    try: ents = BP.parse(bytes(data))
+    except Exception: return None
+    for h, (t, f) in ents.items():
+        raw = data[BP.RANGES[h][0]:BP.RANGES[h][1]]
+        if target in raw.lower():
+            for fh, ft, v in f:
+                if fh == 0xe0c375ae and isinstance(v, str) and v: return str(v)
+    return None
+
+def wem_seconds(wem):
+    try:
+        avg, = struct.unpack_from("<I", wem, 28); p = 12; size = None
+        while p + 8 <= len(wem):
+            tag = wem[p:p + 4]; sz, = struct.unpack_from("<I", wem, p + 4)
+            if tag == b"data": size = sz; break
+            p += 8 + sz + (sz & 1)
+        return size / avg if avg and size else None
+    except Exception: return None
+
+def detect_pack_sound(game, em, files, other):
+    from emoteqol.core import emotes as C
+    ev = None; target = em["vfx"]
+    for name, data in list(files.items()) + list(other.items()):
+        if name.lower().endswith(".bin") and isinstance(data, (bytes, bytearray)):
+            ev = event_from_bin(data, target)
+            if ev: break
+    if not ev: ev = event_for_emote(game, em, C.emote_bins(game))
+    cw = common_wad(game); ob = cw.read(SFX_BNK); ow = cw.read(SFX_WPK)
+    pw = other.get("WAD/Common.wad.client/%016x.wpk" % PK_HASH); pb = other.get("WAD/Common.wad.client/%016x.bnk" % BNK_HASH); bk = pb or ob
+    out = dict(event=ev, found=False, custom=False, retargeted=False, level=None, orig_level=None, seconds=None, wem=None, pop_silenced=False)
+    pe = {e[0]: e for e in wpk.parse_wpk(pw) if e} if pw else {}; oe = {e[0]: e for e in wpk.parse_wpk(ow) if e}
+    if pw:
+        pops = event_sounds(bk, POP_EVENT) or []
+        if pops and all(("%d.wem" % mid) in pe and pw[pe["%d.wem" % mid][1]:pe["%d.wem" % mid][1] + pe["%d.wem" % mid][2]] == SILENT_WEM for sid, mid in pops): out["pop_silenced"] = True
+    snd = event_sounds(bk, ev) if ev else None
+    if not snd: return out
+    out["found"] = True; osnd = event_sounds(ob, ev); out["retargeted"] = snd != osnd
+    secs, objs = bank.parse_bank(bk); osecs, oobjs = bank.parse_bank(ob)
+    for sid, mid in snd:
+        nm = "%d.wem" % mid; data = None
+        if pw and nm in pe: data = pw[pe[nm][1]:pe[nm][1] + pe[nm][2]]
+        elif nm in oe: data = ow[oe[nm][1]:oe[nm][1] + oe[nm][2]]
+        odata = ow[oe[nm][1]:oe[nm][1] + oe[nm][2]] if nm in oe else None
+        if data is not None and data != odata: out["custom"] = True
+        o = _volume_prop(bk, objs, sid); v = struct.unpack_from("<f", bk, o)[0] if o else 0.0
+        if v > -60 and out["level"] is None:
+            out["level"] = v; out["wem"] = data; out["seconds"] = wem_seconds(data) if data else None
+            if sid in oobjs:
+                oo = _volume_prop(ob, oobjs, sid); out["orig_level"] = struct.unpack_from("<f", ob, oo)[0] if oo else 0.0
+    return out
+
+def wem_to_wav(wem, path):
+    vg = _vgmstream()
+    if not vg: return False
+    tmp = tempfile.mktemp(suffix=".wem"); open(tmp, "wb").write(wem)
+    try:
+        subprocess.run([vg, "-o", path, tmp], check=True, capture_output=True, creationflags=0x08000000); return os.path.exists(path)
+    except Exception: return False
+    finally:
+        if os.path.exists(tmp): os.remove(tmp)
+
 def event_sounds(bnk, event_name):
     secs, objs = bank.parse_bank(bnk); eid = fnv32(event_name)
     if eid not in objs or objs[eid][0] != 4: return None
@@ -246,7 +311,7 @@ def apply_sounds(game, sounds, base_wpk=None, base_bnk=None, retargets=None, gai
         for sid, mid in snd:
             repl[str(mid)] = wem
             if is_pcm: struct.pack_into("<I", bnk, objs[sid][1] + 5 + 4, 0x00010001)
-    for ev in sounds:
+    for ev in (list(gain_db) if isinstance(gain_db, dict) else list(sounds)):
         gdb = gain_db.get(ev) if isinstance(gain_db, dict) else gain_db
         if gdb is not None and event_sounds(bytes(bnk), ev):
             ch = raise_event_volume(bnk, ev, gdb)
