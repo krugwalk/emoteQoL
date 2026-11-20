@@ -73,8 +73,25 @@ def load_video_frames(path, fps=24.0, max_seconds=8.0, max_side=384):
     if not frames: raise RuntimeError("could not read any video frames from that file")
     return frames, [step] * len(frames)
 
+def load_video_range(path, start, end, fps=24.0, max_side=384):
+    import av
+    c = av.open(path); vs = c.streams.video[0]; frames = []; step = 1.0 / fps; nxt = float(start)
+    try:
+        if start > 0.5:
+            try: c.seek(int((start - 0.5) / float(vs.time_base)), stream=vs, backward=True, any_frame=False)
+            except Exception: pass
+        for fr in c.decode(vs):
+            t = float(fr.pts * vs.time_base) if fr.pts is not None else nxt
+            if t < start - 1e-6: continue
+            if t > end: break
+            if t + 1e-6 >= nxt:
+                im = fr.to_image().convert("RGBA"); im.thumbnail((max_side, max_side), Image.LANCZOS); frames.append(im); nxt = max(nxt + step, t + step * 0.5)
+    finally: c.close()
+    if not frames: raise RuntimeError("could not read any video frames from that part of the file")
+    return frames, [step] * len(frames)
+
 def load_frames(path):
-    if is_video(path): return load_video_frames(path)
+    if is_video(path): return load_video_frames(path, 12.0, 60.0, 256)
     im = Image.open(path); frames = []; durs = []
     for fr in ImageSequence.Iterator(im): frames.append(fr.convert("RGBA").copy()); durs.append(max(0.01, fr.info.get("duration", 40) / 1000.0))
     if not frames: frames = [im.convert("RGBA")]; durs = [0.04]

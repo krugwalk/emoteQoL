@@ -5,6 +5,8 @@ from PIL import Image, ImageTk
 from emoteqol.core import emotes as C
 from emoteqol.ui import skin_tab
 from emoteqol.ui import size_preview
+from emoteqol.ui import trimbar
+import bisect
 from emoteqol import updater
 
 SETTINGS = os.path.join(C.APPDATA, "settings.json")
@@ -17,7 +19,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__(); self.title("EmoteQoL v%s - emotes, loading screens and HUD portraits with your own pictures" % updater.VERSION); self.geometry("1180x1050"); self.minsize(1000, 800)
         self.set = load_settings(); self.game = None; self.cat = []; self.cur = None; self.pack = C.Pack(); self.icons = {}; self.photo_refs = {}; self.q = queue.Queue()
-        self.cur_i = 0; self.sound_keep = None; self.repl_path = None; self.mem_frames = None; self.repl_frames = []; self.repl_durs = []; self.anim_job = None; self.matches = []
+        self.cur_i = 0; self.times = []; self.clip_total = 0.0; self.trim_t = (0.0, 0.0); self.trim_idx = (0, 0); self.popup_T = 2.3; self.sound_keep = None; self.repl_path = None; self.mem_frames = None; self.repl_frames = []; self.repl_durs = []; self.anim_job = None; self.matches = []
         self._ui(); self.after(100, self._poll); self.after(200, self.open_game); self.after(2500, lambda: updater.check_async(lambda r: self.q.put(lambda: self.show_update(r))))
 
     def _ui(self):
@@ -44,18 +46,17 @@ class App(tk.Tk):
         self.cv = tk.Canvas(box2, width=self.CS, height=self.CS, bg="#262626", highlightthickness=0); self.cv.pack(padx=6, pady=6)
         self.rect = (0.0, 0.0, 1.0, 1.0); self.drag = None; self.cv_photo = None; self.edit_src = []; self.checker = self._make_checker()
         self.cv.bind("<Button-1>", self._cv_down); self.cv.bind("<B1-Motion>", self._cv_move); self.cv.bind("<ButtonRelease-1>", self._cv_up); self.cv.bind("<Motion>", self._cv_hover); self.cv.bind("<MouseWheel>", self._cv_wheel)
+        self.trim = trimbar.TrimBar(box2, self.CS, self.on_trim); self.trim.pack(padx=6, pady=(0, 6))
         self.draw_editor()
         self.src_lbl = ttk.Label(right, text="No image chosen"); self.src_lbl.pack(anchor="w")
         pr = ttk.Frame(right); pr.pack(fill="x", pady=4); ttk.Button(pr, text="Choose GIF / image / video...", command=self.pick_image).pack(side="left")
-        self.vid_sound_v = tk.BooleanVar(value=False); self.vid_sound_cb = ttk.Checkbutton(pr, text="Use this video's sound", variable=self.vid_sound_v, command=self.toggle_video_sound, state="disabled"); self.vid_sound_cb.pack(side="left", padx=12)
+        self.vid_sound_v = tk.BooleanVar(value=False); self.vid_sound_cb = ttk.Checkbutton(pr, text="Use this video's sound", variable=self.vid_sound_v, command=self.toggle_video_sound, state="disabled"); self.vid_sound_cb.pack(side="left", padx=12); ttk.Button(pr, text="Reset position / size", command=self.reset_adj).pack(side="left", padx=6)
         opt = ttk.LabelFrame(right, text="Options"); opt.pack(fill="x", pady=4)
         self.anim_v = tk.BooleanVar(value=True); ttk.Checkbutton(opt, text="Animate in game (GIF -> flipbook)", variable=self.anim_v).grid(row=0, column=0, columnspan=2, sticky="w", padx=6)
         self.size_v = tk.DoubleVar(value=100.0); self.size_lbl = ttk.Label(opt, text="In-game size: 100%", width=18); self.size_lbl.grid(row=0, column=2, sticky="e", padx=(14, 4))
         self.size_scale = ttk.Scale(opt, from_=20, to=200, variable=self.size_v, length=170, command=self._size_changed); self.size_scale.grid(row=0, column=3, columnspan=2, sticky="w")
         ttk.Label(opt, text="Fit:").grid(row=1, column=0, sticky="w", padx=6); self.fit_v = tk.StringVar(value="contain"); cb = ttk.Combobox(opt, textvariable=self.fit_v, values=["contain", "cover", "stretch"], width=10, state="readonly"); cb.grid(row=1, column=1, sticky="w"); cb.bind("<<ComboboxSelected>>", lambda ev: self.refresh_preview())
-        ttk.Label(opt, text="GIF speed (%):").grid(row=1, column=2, sticky="e", padx=(14, 4)); self.loops_v = tk.DoubleVar(value=100.0); ttk.Spinbox(opt, from_=10, to=500, increment=10, textvariable=self.loops_v, width=6).grid(row=1, column=3, sticky="w"); ttk.Label(opt, text="100 = the GIF's own speed", foreground="#666").grid(row=1, column=4, sticky="w", padx=6)
-        sz = ttk.Frame(right); sz.pack(fill="x", pady=2); ttk.Button(sz, text="Reset position / size", command=self.reset_adj).pack(side="left", padx=6)
-        ttk.Label(sz, text="Edges stretch, corners keep proportions (Shift = free), wheel zooms.", foreground="#666", wraplength=470).pack(side="left", padx=6)
+        ttk.Label(opt, text="GIF speed (%):").grid(row=1, column=2, sticky="e", padx=(14, 4)); self.loops_v = tk.DoubleVar(value=100.0); self.loops_v.trace_add("write", lambda *a: self.after_idle(self.update_marker)); ttk.Spinbox(opt, from_=10, to=500, increment=10, textvariable=self.loops_v, width=6).grid(row=1, column=3, sticky="w"); ttk.Label(opt, text="100 = the GIF's own speed", foreground="#666").grid(row=1, column=4, sticky="w", padx=6)
         sl = ttk.Frame(right); sl.pack(fill="x", pady=2); ttk.Label(sl, text="Sound length:").pack(side="left", padx=6)
         self.snd_max_v = tk.DoubleVar(value=6.0); self.snd_len = ttk.Scale(sl, from_=0.3, to=6.0, variable=self.snd_max_v, command=lambda v: self._len_label(), length=300); self.snd_len.pack(side="left", padx=4); self.snd_len.state(["disabled"])
         self.snd_len_lbl = ttk.Label(sl, text="(pick a sound first)", foreground="#666"); self.snd_len_lbl.pack(side="left", padx=6); self.snd_total = 6.0
@@ -177,7 +178,7 @@ class App(tk.Tk):
         s = self.tree.selection()
         if not s: return
         self.cur = self.matches[int(s[0])]; self.cur_name.configure(text=self.cur["name"] + "   (" + self.cur["group"] + ")")
-        self.update_add(); self.update_scene()
+        self.update_add(); self.update_scene(); self.refresh_popup_len()
         if not getattr(self, "loading_pack", False): self.reset_for_emote(self.cur)
         self.refresh_profile()
     def reset_for_emote(self, em):
@@ -185,7 +186,7 @@ class App(tk.Tk):
         if self.mem_frames is not None:
             if self.anim_job: self.after_cancel(self.anim_job); self.anim_job = None
             self.repl_path = None; self.repl_frames = []; self.repl_durs = []; self.edit_src = []; self.mem_frames = None
-            self.src_lbl.configure(text="No image chosen"); self.draw_editor(); self.update_add()
+            self.src_lbl.configure(text="No image chosen"); self.times = []; self.setup_clip(); self.draw_editor(); self.update_add()
         entry = self.pack.emotes.get(em["key"])
         if not entry: return
         try: res = C.extract_frames(em, entry["files"], self.pack.other)
@@ -212,7 +213,7 @@ class App(tk.Tk):
             if f.mode == "RGBA" and max(f.size) <= 700: self.edit_src.append(f)
             else: g = f.convert("RGBA"); g.thumbnail((700, 700), Image.LANCZOS); self.edit_src.append(g)
         if self.sound_path and self.sound_path == self.repl_path and self.sound_path != p: self.clear_sound()
-        self.repl_path = p; kind = "video, converted to a GIF" if C.is_video(p) else ""
+        self.repl_path = p; self.setup_clip(); kind = "video, converted to a GIF" if C.is_video(p) else ""
         self.src_lbl.configure(text="%s   (%d frame%s%s)" % (os.path.basename(p), len(self.repl_frames), "" if len(self.repl_frames) == 1 else "s", ", " + kind if kind else "")); self.reset_adj(); self.play(0); self.update_add()
         self.vid_sound_v.set(False); self.vid_sound_cb.configure(state="disabled")
         if C.is_video(p):
@@ -288,8 +289,39 @@ class App(tk.Tk):
     def play(self, i):
         if self.anim_job: self.after_cancel(self.anim_job); self.anim_job = None
         if not self.repl_frames: return
+        lo, hi = self.trim_idx
+        if len(self.repl_frames) > 1 and (i < lo or i > hi): i = lo
         self.cur_i = i % len(self.repl_frames); self.draw_editor()
+        if self.times and self.cur_i < len(self.times): self.trim.set_playhead(self.times[self.cur_i])
         if len(self.repl_frames) > 1: self.anim_job = self.after(self.frame_delay_ms(i), lambda: self.play(i + 1))
+    def setup_clip(self):
+        self.times = []; t = 0.0
+        for d in self.repl_durs: self.times.append(t); t += d
+        self.clip_total = t if len(self.repl_frames) > 1 else 0.0; self.trim_t = (0.0, self.clip_total); self.trim_idx = (0, max(0, len(self.repl_frames) - 1))
+        self.trim.set_clip(self.clip_total); self.update_marker()
+    def on_trim(self, t0, t1):
+        n = len(self.times)
+        if not n: return
+        lo = bisect.bisect_left(self.times, t0 - 1e-6); hi = bisect.bisect_left(self.times, t1 - 1e-6) - 1
+        lo = min(lo, n - 1); hi = max(lo, min(hi, n - 1)); self.trim_t = (t0, t1); self.trim_idx = (lo, hi); self.update_marker(); self.play(lo)
+    def update_marker(self):
+        try: sp = max(0.1, float(self.loops_v.get()) / 100.0)
+        except Exception: sp = 1.0
+        self.trim.set_speed(sp); self.trim.set_marker(self.trim_t[0] + self.popup_T * sp)
+    def refresh_popup_len(self):
+        if not self.cur or not self.game: return
+        em = self.cur; game = self.game
+        def work():
+            best = 0.0
+            for bh in C.emote_bins(game):
+                d = game.read(bh)
+                if d and em["vfx"].lower().encode() in d.lower():
+                    try: best = max(best, C.popup_length(d, em["vfx"]))
+                    except Exception: pass
+            return best
+        def done(r, err):
+            if self.cur is em and r: self.popup_T = r; self.update_marker()
+        self.run_bg(work, done)
     def frame_delay_ms(self, i):
         try: sp = max(0.1, float(self.loops_v.get()) / 100.0)
         except Exception: sp = 1.0
@@ -325,14 +357,17 @@ class App(tk.Tk):
         e = self.cur; path = self.repl_path; animated = self.anim_v.get(); fit = self.fit_v.get(); loops = float(self.loops_v.get()); adj = self.adj()
         size = int(round(self.size_v.get())); flat = True; opa = 0; qual = "compact"
         self.busy("Building the replacement for '%s'..." % e["name"]); self.add_btn.configure(state="disabled")
-        spath = self.sound_path; sgame = self.sound_game; keep = self.sound_keep if not (self.sound_path or self.sound_game) else None; mem = self.mem_frames if (self.mem_frames and path == self.repl_path) else None
+        t0, t1 = self.trim_t; popup_T = self.popup_T; lo, hi = self.trim_idx; cut = bool(path and len(self.repl_frames) > 1 and (hi - lo + 1) < len(self.repl_frames)); piece = (self.repl_frames[lo:hi + 1], self.repl_durs[lo:hi + 1]) if cut else None
+        vstart = t0 if (self.sound_path and self.sound_path == path and C.is_video(path)) else 0.0
+        spath = self.sound_path; sgame = self.sound_game; keep = self.sound_keep if not (self.sound_path or self.sound_game) else None; mem = (piece or self.mem_frames) if (self.mem_frames and path == self.repl_path) else None
         try: smax = max(0.3, float(self.snd_max_v.get()))
         except Exception: smax = 6.0
         try: sboost = min(30.0, max(-30.0, float(self.snd_boost_v.get())))
         except Exception: sboost = 0.0
         def job():
             from emoteqol.core import audio as A
-            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, mem, flat) if path else (C.build_size_only(self.game, e, size, flat) if size != 100 else ({}, [])); snd = None
+            pre = mem or (C.load_video_range(path, t0, min(t1, t0 + max(4.0, popup_T * loops / 100.0 + 1.0))) if (path and C.is_video(path)) else piece)
+            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, pre, flat) if path else (C.build_size_only(self.game, e, size, flat) if size != 100 else ({}, [])); snd = None
             if spath or sgame:
                 from emoteqol.core import audio as A
                 ev = A.event_for_emote(self.game, e, C.emote_bins(self.game))
@@ -341,7 +376,7 @@ class App(tk.Tk):
                 elif sgame:
                     snd = dict(event=ev, wem=None, pcm=False, retarget=sgame["event"], source="sound of '%s'" % sgame["name"], note="plays the in-game sound of %s" % sgame["name"]); notes.append("sound: plays the in-game sound of '%s'" % sgame["name"])
                 else:
-                    wem, pcm, note = A.make_wem(spath, smax); snd = dict(event=ev, wem=wem, pcm=pcm, level=A.stock_level(self.game, ev) + sboost, source=os.path.basename(spath), note=note); notes.append("sound (%s): %s" % (ev, note))
+                    wem, pcm, note = A.make_wem(spath, min(smax, (t1 - t0) if vstart else smax), -4.0, "Evened out", vstart); snd = dict(event=ev, wem=wem, pcm=pcm, level=A.stock_level(self.game, ev) + sboost, source=os.path.basename(spath), note=note); notes.append("sound (%s): %s" % (ev, note))
             elif keep and keep.get("level") is not None and abs(A.stock_level(self.game, keep["event"]) + sboost - keep["level"]) > 0.01:
                 from emoteqol.core import audio as A
                 snd = dict(event=keep["event"], keep=True, wem=None, pcm=False, level=A.stock_level(self.game, keep["event"]) + sboost, source="current sound, volume changed", note="volume %+g dB from the game's own" % sboost); notes.append("sound: kept, volume %+g dB from the game's own" % sboost)
@@ -386,6 +421,7 @@ class App(tk.Tk):
     def play_preview(self):
         if not self.cur or not self.game: return messagebox.showinfo("Pick an emote", "Pick an emote and a sound first.")
         spath, sgame = self.sound_path, self.sound_game; keep = self.sound_keep; em = self.cur; game = self.game
+        pstart = self.trim_t[0] if (self.sound_path and self.sound_path == self.repl_path and self.repl_path and C.is_video(self.repl_path)) else 0.0
         try: smax = max(0.3, float(self.snd_max_v.get())); off = float(self.snd_boost_v.get())
         except Exception: smax, off = 6.0, 0.0
         if not (spath or sgame or keep): return messagebox.showinfo("No sound", "Choose a sound first (or pick one from another emote).")
@@ -393,7 +429,7 @@ class App(tk.Tk):
         def work():
             from emoteqol.core import audio as A
             ev = A.event_for_emote(game, em, C.emote_bins(game))
-            if spath: prof = A.ingame_profile(game, ev, off); return A.preview_wav(spath, smax, prof), prof["text"]
+            if spath: prof = A.ingame_profile(game, ev, off); return A.preview_wav(spath, smax, prof, None, pstart), prof["text"]
             if sgame: prof = A.ingame_profile(game, sgame["event"], 0.0); wem, lv = A.first_audible_wem(game, sgame["event"]); return (A.preview_wav(None, 0, prof, wem) if wem else None), prof["text"]
             if keep and keep.get("wem"): prof = A.ingame_profile(game, ev, off); return A.preview_wav(None, 0, prof, keep["wem"]), prof["text"]
             return None, ""
@@ -522,7 +558,7 @@ class App(tk.Tk):
         st = self.pack.emotes[em["key"]].get("settings") or {}; speed = float(st.get("speed", 100.0)) or 100.0
         self.loops_v.set(speed); self.anim_v.set(bool(st.get("animate", len(frames) > 1)))
         if speed != 100.0: self.repl_durs = [x * speed / 100.0 for x in durs]; self.mem_frames = (self.repl_frames, self.repl_durs)
-        self.restore_sound_and_size(em)
+        self.setup_clip(); self.restore_sound_and_size(em)
         self.src_lbl.configure(text="%s   (%d frame%s, loaded from the pack - move, stretch or change it, then press Add)" % (em["name"], len(self.repl_frames), "" if len(self.repl_frames) == 1 else "s"))
         self.reset_adj(); self.play(0); self.update_add(); self.refresh_profile(); self.busy("Loaded '%s' from the pack into the editor." % em["name"])
     def remove_selected(self):

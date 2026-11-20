@@ -168,7 +168,7 @@ def apply_game_filters(x, lpf, hpf):
     if hpf > 0: H = H / np.sqrt(1.0 + (hpf_hz(hpf) / np.maximum(f, 1e-6)) ** 4)
     return np.fft.irfft(X * H, n)
 
-def preview_wav(path, max_seconds, profile, wem=None):
+def preview_wav(path, max_seconds, profile, wem=None, start=0.0):
     import numpy as np
     out_path = tempfile.mktemp(suffix=".wav")
     if wem is not None:
@@ -183,7 +183,7 @@ def preview_wav(path, max_seconds, profile, wem=None):
         if ch > 1: x = x.reshape(-1, ch).mean(axis=1)
         x = x[:int(max_seconds * RATE)]
     else:
-        pcm = load_pcm(path)[:int(max_seconds * RATE)]; tmp = tempfile.mktemp(suffix=".wav"); _write_wav(tmp, pcm, -4.0, DYN_RATIOS["Evened out"])
+        pcm = load_pcm(path)[int(start * RATE):][:int(max_seconds * RATE)]; tmp = tempfile.mktemp(suffix=".wav"); _write_wav(tmp, pcm, -4.0, DYN_RATIOS["Evened out"])
         w = wave.open(tmp); x = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float64) / 32768.0; w.close(); os.remove(tmp)
     x = apply_game_filters(x, profile["lpf"], profile["hpf"])
     y = np.clip(x * 10 ** (profile["total_db"] / 20.0), -1.0, 1.0)
@@ -291,14 +291,16 @@ def pcm_wem(pcm):
     body = b"WAVE" + b"fmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(data)) + data
     return b"RIFF" + struct.pack("<I", len(body)) + body
 
-def make_wem(path, max_seconds=6, boost_db=-4.0, dynamics="Evened out"):
+def make_wem(path, max_seconds=6, boost_db=-4.0, dynamics="Evened out", start=0.0):
     if path.lower().endswith(".wem"):
         d = open(path, "rb").read(); tag = struct.unpack_from("<H", d, 20)[0] if d[:4] == b"RIFF" and d[12:16] == b"fmt " else None
         if tag is None: raise RuntimeError("That .wem isn't a RIFF audio file.")
         return d, tag != 0xFFFF, "ready-made .wem used as is (%s)" % ("Vorbis" if tag == 0xFFFF else "uncompressed")
     wc, proj = wwise_tools()
     if not wc: raise RuntimeError("To use your own audio the app needs LtMAO's Wwise converter, but LtMAO wasn't found. Click 'Find LtMAO...' in the Custom sound box and pick the LtMAO folder (the one with start.bat), or choose a ready-made .wem.")
-    pcm = load_pcm(path); secs = len(pcm) / RATE
+    pcm = load_pcm(path)
+    if start: pcm = pcm[int(start * RATE):]
+    secs = len(pcm) / RATE
     if secs > max_seconds: pcm = pcm[:int(max_seconds * RATE)]
     return wwise_convert(wc, proj, pcm, boost_db, DYN_RATIOS.get(dynamics, 1.0)), False, "converted to a Wwise Vorbis .wem (%.1f s, %s)%s" % (min(secs, max_seconds), dynamics.lower(), "; trimmed" if secs > max_seconds else "")
 
