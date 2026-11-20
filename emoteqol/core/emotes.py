@@ -194,13 +194,15 @@ def scale_popup(binbytes, vfx_path, factor):
     BP.RANGES.clear(); BP.parse(bytes(d))
     return bytes(d), changed
 
-def build_size_only(game, em, size):
-    files = {}; notes = []; hits = 0
+def build_size_only(game, em, size, flat=False):
+    files = {}; notes = []; hits = 0; gone = 0
     for bh in emote_bins(game):
         d = game.read(bh)
         if d and em["vfx"].lower().encode() in d.lower():
+            if flat: d, k = flatten_popup(d, em["vfx"]); gone += k
             nb, n = scale_popup(d, em["vfx"], max(1.0, float(size)) / 100.0)
-            if n: files["%016x.bin" % bh] = nb; hits += n
+            if n or flat: files["%016x.bin" % bh] = nb; hits += n
+    if flat: notes.append("flash and glow removed (%d layer(s))" % gone)
     notes.append("in-game size %d%%: %d popup layer(s) resized" % (size, hits) if hits else "in-game size: this popup has no size setting that can be changed")
     return files, notes
 
@@ -250,7 +252,7 @@ def popup_settings(game, em, files, other):
             try: mine = popup_emitters(data, em["vfx"])
             except Exception: mine = None
             if mine: break
-    if not mine: return 100, 0
+    if not mine: return 100, 0, False
     orig = None
     for bh in emote_bins(game):
         d = game.read(bh)
@@ -258,7 +260,8 @@ def popup_settings(game, em, files, other):
             try: orig = popup_emitters(d, em["vfx"])
             except Exception: orig = None
             if orig: break
-    if not orig: return 100, 0
+    if not orig: return 100, 0, False
+    flat = any(x["blend"] == 4 and x["scale"] and x["scale"][0] == 0 for x in mine) and not any(x["blend"] == 4 and x["scale"] and x["scale"][0] > 0 for x in mine)
     size = 100
     for m in mine:
         o = next((x for x in orig if x["name"] == m["name"] and x["scale"] and x["scale"][0] > 0), None)
@@ -266,7 +269,7 @@ def popup_settings(game, em, files, other):
             size = int(round(m["scale"][0] / o["scale"][0] * 100 / 5.0) * 5); break
     normal = lambda L: sum(1 for x in L if x["blend"] == 1)
     layers = max(1, int(round(normal(mine) / max(1, normal(orig)))))
-    return max(20, min(200, size)), min(2, layers - 1)
+    return max(20, min(200, size)), min(2, layers - 1), flat
 
 def extract_frames(em, files, other):
     key = em["vfx"].lower()
@@ -286,6 +289,31 @@ def extract_frames(em, files, other):
     frames = [sheet.crop(((i % cols) * cw, (i // cols) * ch, (i % cols) * cw + cw, (i // cols) * ch + ch)) for i in range(min(count, cols * rows))]
     step = 1.0 / fps if fps else 1.0 / 12.0
     return frames, [step] * len(frames), fps
+
+def flatten_popup(binbytes, vfx_path):
+    d = bytearray(binbytes); BP.RANGES.clear(); ents = BP.parse(bytes(d)); removed = 0; target = vfx_path.lower()
+    for entry in ents:
+        if ents[entry][0] != 0x45cd899f: continue
+        BP.RANGES.clear(); BP.parse(bytes(d)); ln_off, lst = _spans(d, entry)
+        if not lst: continue
+        infos = []
+        for it in lst["items"]:
+            F = _fields(d, it["start"]); tex = None; blend = None
+            if FLAGS["tex"] in F:
+                ft, vs = F[FLAGS["tex"]]; n = struct.unpack_from("<H", d, vs)[0]; tex = bytes(d[vs + 2:vs + 2 + n]).decode("latin1").lower()
+            if FLAGS["blend"] in F: blend = BP.value(BP.R(bytes(d), F[FLAGS["blend"]][1]), F[FLAGS["blend"]][0])
+            infos.append((F, tex, blend))
+        if not any(t == target for F, t, b in infos): continue
+        for F, tex, blend in infos:
+            if tex == target and blend != 4: continue
+            if FLAGS["birthscale"] not in F: continue
+            try: ft, vs = _fields(d, F[FLAGS["birthscale"]][1])[0xb4b427aa]
+            except KeyError: continue
+            if ft != 12: continue
+            x, y, z = struct.unpack_from("<3f", d, vs)
+            if x or y or z: struct.pack_into("<3f", d, vs, 0.0, 0.0, 0.0); removed += 1
+    BP.RANGES.clear(); BP.parse(bytes(d))
+    return bytes(d), removed
 
 def popup_length(binbytes, vfx_path):
     d = bytearray(binbytes); BP.RANGES.clear(); ents = BP.parse(bytes(d)); best = 0.0; target = vfx_path.lower()
@@ -339,14 +367,14 @@ def make_sheet(frames, durs, cell=None, fit="contain", max_frames=64, adj=(100, 
         sheet.paste(fit_frame(frames[i], cell, fit, adj), ((k % cols) * cell, (k // cols) * cell))
     return sheet, cols, rows
 
-def build_replacement(game, em, image_path, animated=True, fit="contain", speed=100.0, progress=None, adj=(100, 0, 0), opacity=0, quality="compact", popup_size=100, preloaded=None):
+def build_replacement(game, em, image_path, animated=True, fit="contain", speed=100.0, progress=None, adj=(100, 0, 0), opacity=0, quality="compact", popup_size=100, preloaded=None, flat=False):
     notes = []; frames, durs = preloaded if preloaded else load_frames(image_path); files = {}; best = quality == "best"; fmt = "BGRA8" if best else "DXT5"
     still = frames[0] if len(frames) == 1 else frames[len(frames) // 2]
     files[em["inv"].lower()] = encode_tex(fit_frame(still, 256, fit, adj), "DXT5", mips=False)
     if game.has(em["sel"].lower()): files[em["sel"].lower()] = encode_tex(fit_frame(still, 128, fit, adj), "DXT5", mips=False)
     if not game.has(em["vfx"].lower()): notes.append("this emote has no in-game popup texture; only its icons were replaced"); return files, notes
     hits = []
-    if (animated and len(frames) > 1) or opacity or popup_size != 100:
+    if (animated and len(frames) > 1) or opacity or popup_size != 100 or flat:
         for bh in emote_bins(game, progress):
             d = game.read(bh)
             if d and em["vfx"].lower().encode() in d.lower(): hits.append((bh, d))
@@ -373,6 +401,12 @@ def build_replacement(game, em, image_path, animated=True, fit="contain", speed=
             nb, n = boost_opacity(bins.get(bh, d), em["vfx"], int(opacity))
             if n: bins[bh] = nb; done += n
         notes.append("opacity: %d popup layer(s) stacked %dx so the picture is more solid" % (done, int(opacity) + 1) if done else "opacity: no stackable popup layer found")
+    if flat:
+        gone = 0
+        for bh, d in hits:
+            nb, n = flatten_popup(bins.get(bh, d), em["vfx"])
+            if n: bins[bh] = nb; gone += n
+        notes.append("flash and glow removed (%d layer(s))" % gone if gone else "no flash or glow layer to remove")
     if popup_size != 100:
         done = 0
         for bh, d in hits:

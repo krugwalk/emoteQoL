@@ -59,7 +59,8 @@ class App(tk.Tk):
         ttk.Label(opt, text="GIF speed (%):").grid(row=1, column=2, sticky="e", padx=(14, 4)); self.loops_v = tk.DoubleVar(value=100.0); ttk.Spinbox(opt, from_=10, to=500, increment=10, textvariable=self.loops_v, width=6).grid(row=1, column=3, sticky="w"); ttk.Label(opt, text="100 = the GIF's own speed", foreground="#666").grid(row=1, column=4, sticky="w", padx=6)
         ttk.Label(opt, text="Solidity:").grid(row=2, column=0, sticky="w", padx=6); self.opa_v = tk.StringVar(value="Normal (like the game)")
         ttk.Combobox(opt, textvariable=self.opa_v, values=["Normal (like the game)", "More solid (2 layers)", "Very solid (3 layers)"], width=21, state="readonly").grid(row=2, column=1, columnspan=2, sticky="w")
-        ttk.Label(opt, text="use if it looks see-through in game", foreground="#666").grid(row=2, column=3, columnspan=2, sticky="w", padx=6)
+        ttk.Label(opt, text="Flash / glow:").grid(row=2, column=3, sticky="e", padx=(14, 4)); self.flat_v = tk.StringVar(value="Remove")
+        ttk.Combobox(opt, textvariable=self.flat_v, values=["Remove", "Keep (like the game)"], width=18, state="readonly").grid(row=2, column=4, sticky="w")
         sz = ttk.Frame(right); sz.pack(fill="x", pady=2); ttk.Button(sz, text="Reset position / size", command=self.reset_adj).pack(side="left", padx=6)
         ttk.Label(sz, text="Edges stretch, corners keep proportions (Shift = free), wheel zooms. Bright square = what goes in the emote.", foreground="#666", wraplength=470).pack(side="left", padx=6)
         sl = ttk.Frame(right); sl.pack(fill="x", pady=2); ttk.Label(sl, text="Sound length:").pack(side="left", padx=6)
@@ -303,7 +304,7 @@ class App(tk.Tk):
 
     def add_to_pack(self):
         e = self.cur; path = self.repl_path; animated = self.anim_v.get(); fit = self.fit_v.get(); loops = float(self.loops_v.get()); adj = self.adj()
-        size = int(round(self.size_v.get())); opa = {"Normal (like the game)": 0, "More solid (2 layers)": 1, "Very solid (3 layers)": 2}.get(self.opa_v.get(), 0); qual = "compact"
+        size = int(round(self.size_v.get())); flat = self.flat_v.get() == "Remove"; opa = {"Normal (like the game)": 0, "More solid (2 layers)": 1, "Very solid (3 layers)": 2}.get(self.opa_v.get(), 0); qual = "compact"
         self.busy("Building the replacement for '%s'..." % e["name"]); self.add_btn.configure(state="disabled")
         spath = self.sound_path; sgame = self.sound_game; mem = self.mem_frames if (self.mem_frames and path == self.repl_path) else None
         try: smax = max(0.3, float(self.snd_max_v.get()))
@@ -311,7 +312,7 @@ class App(tk.Tk):
         try: sboost = min(24.0, max(-30.0, float(self.snd_boost_v.get())))
         except Exception: sboost = -5.0
         def job():
-            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, mem) if path else (C.build_size_only(self.game, e, size) if size != 100 else ({}, [])); snd = None
+            files, notes = C.build_replacement(self.game, e, path, animated, fit, loops, None, adj, opa, qual, size, mem, flat) if path else (C.build_size_only(self.game, e, size, flat) if size != 100 else ({}, [])); snd = None
             if spath or sgame:
                 from emoteqol.core import audio as A
                 ev = A.event_for_emote(self.game, e, C.emote_bins(self.game))
@@ -414,8 +415,9 @@ class App(tk.Tk):
             if max(f.size) <= 700: self.edit_src.append(f)
             else: g = f.copy(); g.thumbnail((700, 700), Image.LANCZOS); self.edit_src.append(g)
         self.repl_path = "(from the pack) " + em["name"]; self.fit_v.set("stretch"); self.loops_v.set(100.0)
-        try: size, layers = C.popup_settings(self.game, em, self.pack.emotes[em["key"]]["files"], self.pack.other)
-        except Exception: size, layers = 100, 0
+        try: size, layers, flat = C.popup_settings(self.game, em, self.pack.emotes[em["key"]]["files"], self.pack.other)
+        except Exception: size, layers, flat = 100, 0, False
+        self.flat_v.set("Remove" if flat else "Keep (like the game)")
         self.size_v.set(size); self._size_changed(); self.opa_v.set(["Normal (like the game)", "More solid (2 layers)", "Very solid (3 layers)"][layers])
         self.src_lbl.configure(text="%s   (%d frame%s, loaded from the pack - move, stretch or change it, then press Add)" % (em["name"], len(self.repl_frames), "" if len(self.repl_frames) == 1 else "s"))
         self.reset_adj(); self.play(0); self.update_add(); self.busy("Loaded '%s' from the pack into the editor." % em["name"])
