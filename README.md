@@ -25,9 +25,9 @@ Everything you add shows up in the list at the bottom. Press Save to make the `.
 
 ## Custom sounds
 
-To use your own sound file the app needs [LtMAO](https://github.com/tarngaina/LtMAO). Download it and unzip it anywhere, you don't have to run it. EmoteQoL finds it by itself, or you can point to it with the "Find LtMAO" button.
+Your own sound files are converted with the Wwise converter and decoder from [LtMAO](https://github.com/tarngaina/LtMAO). The installer downloads just those parts (about 55 MB) from LtMAO's GitHub into the install folder. Nothing of LtMAO is bundled in EmoteQoL. If you skipped it, use the Download sound tools button in the Sound box. If you already have LtMAO, EmoteQoL finds it by itself, or you can point to it with the Find LtMAO button.
 
-Without LtMAO you can still copy the sound of another emote.
+Without it you can still copy the sound of another emote.
 
 ## Run it from source
 

@@ -6,6 +6,7 @@ from emoteqol.core import emotes as C
 from emoteqol.ui import skin_tab
 from emoteqol.ui import size_preview
 from emoteqol.core import styles as PS
+from emoteqol.core import ltmao as LF
 import time
 from emoteqol.ui import trimbar
 import bisect
@@ -69,7 +70,7 @@ class App(tk.Tk):
         ttk.Button(sb_, text="Choose sound...", command=self.pick_sound).grid(row=0, column=0, padx=6, pady=4); self.sound_lbl = ttk.Label(sb_, text="none - the emote keeps its normal sound", wraplength=330); self.sound_lbl.grid(row=0, column=1, sticky="w")
         ttk.Button(sb_, text="Clear", command=self.clear_sound).grid(row=0, column=2, padx=6); ttk.Button(sb_, text="Use another emote's sound...", command=self.pick_game_sound).grid(row=0, column=3, padx=6)
         r3 = ttk.Frame(sb_); r3.grid(row=1, column=0, columnspan=4, sticky='w', padx=6)
-        ttk.Label(r3, text="Volume (dB, 0 = the game's own):").pack(side='left'); self.snd_boost_v = tk.DoubleVar(value=0.0); ttk.Spinbox(r3, from_=-30, to=30, increment=1, textvariable=self.snd_boost_v, width=5).pack(side='left', padx=4); ttk.Button(r3, text='Play preview', command=self.play_preview).pack(side='left', padx=(10, 2)); ttk.Button(r3, text='Stop', command=self.stop_preview).pack(side='left'); ttk.Button(r3, text='Find LtMAO...', command=self.find_ltmao).pack(side='left', padx=10)
+        ttk.Label(r3, text="Volume (dB, 0 = the game's own):").pack(side='left'); self.snd_boost_v = tk.DoubleVar(value=0.0); ttk.Spinbox(r3, from_=-30, to=30, increment=1, textvariable=self.snd_boost_v, width=5).pack(side='left', padx=4); ttk.Button(r3, text='Play preview', command=self.play_preview).pack(side='left', padx=(10, 2)); ttk.Button(r3, text='Stop', command=self.stop_preview).pack(side='left'); ttk.Button(r3, text='Find LtMAO...', command=self.find_ltmao).pack(side='left', padx=10); self.ltmao_dl = ttk.Button(r3, text='Download sound tools (55 MB)', command=self.download_ltmao)
         self.ltmao_lbl = ttk.Label(r3, text='', foreground='#666'); self.ltmao_lbl.pack(side='left')
         ttk.Label(sb_, text='Your own mp3/wav/ogg/mp4 is converted with the Wwise that comes with LtMAO. Shorten it with the Sound length slider.', foreground='#666', wraplength=520).grid(row=2, column=0, columnspan=4, sticky='w', padx=6, pady=(0, 4))
         self.profile_lbl = ttk.Label(sb_, text="", foreground="#444", wraplength=520, justify="left"); self.profile_lbl.grid(row=3, column=0, columnspan=4, sticky="w", padx=6, pady=(0, 4)); self.profile_job = None
@@ -443,12 +444,26 @@ class App(tk.Tk):
         from emoteqol.core import audio as A
         def work():
             return A.find_ltmao()
-        self.run_bg(work, lambda r, err: self.ltmao_lbl.configure(text=("LtMAO found - your own sounds will work" if r else "LtMAO not found - click 'Find LtMAO...'")))
+        self.run_bg(work, lambda r, err: self.show_ltmao(bool(r)))
+    def show_ltmao(self, found):
+        if found: self.ltmao_dl.pack_forget(); self.ltmao_lbl.configure(text="LtMAO found - your own sounds work")
+        else: self.ltmao_lbl.configure(text=""); self.ltmao_dl.configure(state="normal", text="Download sound tools (55 MB)"); self.ltmao_dl.pack(side="left", padx=(0, 6), before=self.ltmao_lbl)
+    def download_ltmao(self):
+        from emoteqol.core import audio as A
+        dest = installer.ltmao_dir(installer.install_dir()) if installer.installed_here() else os.path.join(C.APPDATA, "LtMAO")
+        self.ltmao_dl.configure(state="disabled", text="Downloading...")
+        def progress(done, total): self.q.put(lambda: self.ltmao_dl.configure(text="Downloading... %d%%" % (100 * done // max(1, total))))
+        def work():
+            LF.download(dest, progress); A.set_ltmao(dest); return dest
+        def done(r, err):
+            if err: self.show_ltmao(False); self.ltmao_dl.configure(text="Download failed - try again"); return messagebox.showerror("Could not download the sound tools", err.strip().splitlines()[-1][:300] + "\n\nCheck your internet connection and try again.")
+            self.show_ltmao(True); self.busy("Sound tools installed in " + dest)
+        self.run_bg(work, done)
     def find_ltmao(self):
         from emoteqol.core import audio as A
         p = filedialog.askdirectory(title="Pick the LtMAO folder (the one with start.bat)")
         if not p: return
-        if A.set_ltmao(p): self.ltmao_lbl.configure(text="LtMAO found - your own sounds will work")
+        if A.set_ltmao(p): self.show_ltmao(True)
         else: messagebox.showerror("Not LtMAO", "That folder doesn't contain LtMAO's Wwise converter (res/wiwawe/...). Pick the LtMAO folder that has start.bat in it.")
     def refresh_profile(self):
         if not self.cur or not self.game: return
@@ -636,7 +651,7 @@ class App(tk.Tk):
                 def play():
                     import tempfile, winsound
                     p = tempfile.mktemp(suffix=".wav")
-                    if not A.wem_to_wav(snd["wem"], p): return messagebox.showinfo("Cannot play", "Playing needs LtMAO (its decoder). Click 'Find LtMAO...' in the Sound box first.")
+                    if not A.wem_to_wav(snd["wem"], p): return messagebox.showinfo("Cannot play", "Playing needs the sound tools. Use the Download button in the Sound box first.")
                     winsound.PlaySound(p, winsound.SND_FILENAME | winsound.SND_ASYNC)
                 ttk.Button(dlg, text="Play the sound", command=play).pack(pady=(4, 0))
         row = ttk.Frame(dlg); row.pack(pady=12); ttk.Button(row, text="Edit this in the editor", command=edit_now).pack(side="left", padx=6); ttk.Button(row, text="Save as GIF...", command=save_gif).pack(side="left", padx=6); ttk.Button(row, text="Close", command=close).pack(side="left", padx=6)
