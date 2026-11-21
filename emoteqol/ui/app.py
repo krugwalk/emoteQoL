@@ -21,7 +21,10 @@ def save_settings(s): json.dump(s, open(SETTINGS, "w"))
 
 class App(tk.Tk):
     def __init__(self):
-        super().__init__(); self.title("EmoteQoL v%s - emotes, loading screens and HUD portraits with your own pictures" % updater.VERSION); self.geometry("1180x1050"); self.minsize(1000, 800)
+        super().__init__(); self.title("EmoteQoL v%s" % updater.VERSION)
+        try: self.iconbitmap(default=installer.resource("icon.ico"))
+        except Exception: pass
+        self.geometry("1180x1050"); self.minsize(1000, 800)
         self.set = load_settings(); self.game = None; self.cat = []; self.cur = None; self.pack = C.Pack(); self.icons = {}; self.photo_refs = {}; self.q = queue.Queue()
         self.cur_i = 0; self.times = []; self.clip_total = 0.0; self.trim_t = (0.0, 0.0); self.trim_idx = (0, 0); self.popup_T = 2.3; self.style_src = None; self.style_templates = []; self.popup_job = None; self.popup_playing = False; self.sound_keep = None; self.repl_path = None; self.mem_frames = None; self.repl_frames = []; self.repl_durs = []; self.anim_job = None; self.matches = []
         self._ui(); self.after(100, self._poll); self.after(200, self.open_game); self.after(2500, lambda: updater.check_async(lambda r: self.q.put(lambda: self.show_update(r))))
@@ -45,7 +48,7 @@ class App(tk.Tk):
         right = ttk.Frame(main); main.add(right, weight=1)
         self.cur_name = ttk.Label(right, text="Pick an emote on the left", font=("Segoe UI", 13, "bold")); self.cur_name.pack(anchor="w")
         row = ttk.Frame(right); row.pack(fill="x", pady=6)
-        box1 = ttk.LabelFrame(row, text="In game, above your champion"); box1.pack(side="left", padx=4); self.scene_lbl = ttk.Label(box1); self.scene_lbl.pack(padx=6, pady=(6, 2)); self.scene_photo = None
+        box1 = ttk.LabelFrame(row, text="In game, above your champion"); box1.pack(side="left", padx=4); self.scene_lbl = ttk.Label(box1); self.scene_lbl.pack(padx=6, pady=(6, 2)); self.scene_photo = None; self.scene_lbl.bind("<Button-1>", lambda e: None if self.edit_src else self.pick_image())
         self.pop_btn = ttk.Button(box1, text="Pop up", command=self.play_popup, state="disabled"); self.pop_btn.pack(pady=(0, 6))
         box2 = ttk.LabelFrame(row, text="Your replacement - drag to move, drag the edges / corners to stretch"); box2.pack(side="left", padx=4)
         self.cv = tk.Canvas(box2, width=self.CS, height=self.CS, bg="#262626", highlightthickness=0); self.cv.pack(padx=6, pady=6)
@@ -359,6 +362,7 @@ class App(tk.Tk):
         return max(15, int(self.repl_durs[i % len(self.repl_durs)] * 1000 / sp))
     def update_scene(self):
         if not hasattr(self, "scene_lbl") or self.popup_playing: return
+        self.scene_lbl.configure(cursor="" if self.edit_src else "hand2")
         pic = None
         if self.edit_src:
             try: pic = C.fit_frame(self.edit_src[self.cur_i % len(self.edit_src)], 160, self.fit_v.get(), self.adj())

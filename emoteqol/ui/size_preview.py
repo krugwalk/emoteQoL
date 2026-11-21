@@ -161,6 +161,8 @@ def render_small(percent, picture=None, scale=0.42):
         _small_cache[key] = base.resize((int(base.width * scale), int(base.height * scale)), Image.LANCZOS)
     img = _small_cache[key].copy()
     d = ImageDraw.Draw(img)
+    if picture is None:
+        picture = _placeholder(160)
     cx, cy = int((BAR_CENTER_X + 3) * scale), int((BAR_TOP_Y - POPUP_UP + PAD) * scale)
     half0 = int(POPUP_REAL * scale / 2)
     size = max(6, int(round(POPUP_REAL * scale * percent / 100.0)))
@@ -195,13 +197,16 @@ _placeholder_cache = {}
 
 def _placeholder(size=160):
     if size not in _placeholder_cache:
-        im = Image.new("RGBA", (size, size), (255, 203, 71, 255))
+        im = Image.new("RGBA", (size, size), (90, 90, 90, 255))
         d = ImageDraw.Draw(im)
-        r, ex, ey = max(3, size // 14), size // 5, size // 8
-        c = size // 2
-        d.ellipse((c - ex - r, c - ey - r, c - ex + r, c - ey + r), fill=(60, 40, 10))
-        d.ellipse((c + ex - r, c - ey - r, c + ex + r, c - ey + r), fill=(60, 40, 10))
-        d.arc((c - size // 4, c - size // 6, c + size // 4, c + size // 4), 20, 160, fill=(60, 40, 10), width=max(3, size // 20))
+        sq = max(2, int(round(size * 10 / 166)))
+        for y in range(0, size, sq):
+            for x in range(0, size, sq):
+                if ((x // sq) + (y // sq)) % 2:
+                    d.rectangle((x, y, x + sq - 1, y + sq - 1), fill=(120, 120, 120, 255))
+        f = _font(max(8, size // 5))
+        for i, line in enumerate(("Choose", "a GIF /", "image")):
+            d.text((size // 2, int(size * 0.30) + i * int(size * 0.24)), line, font=f, fill=(205, 205, 205, 255), anchor="mm")
         _placeholder_cache[size] = im
     return _placeholder_cache[size]
 
